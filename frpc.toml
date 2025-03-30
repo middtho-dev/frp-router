@@ -2,13 +2,13 @@ serverAddr = "router.kv9.ru"
 serverPort = 7000
 
 [[proxies]]
-name = "Воробьев Luci"
+name = "Vorobiev Luci"
 type = "tcp"
 localPort = 80
 remotePort = 8082
 
 [[proxies]]
-name = "Воробьев SSH"
+name = "Vorobiev SSH"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
