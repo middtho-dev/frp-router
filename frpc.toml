@@ -5,11 +5,11 @@ serverPort = 7000
 name = "Воробьев Luci"
 type = "tcp"
 localPort = 80
-remotePort = 8081
+remotePort = 8082
 
 [[proxies]]
 name = "Воробьев SSH"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
-remotePort = 2201
+remotePort = 2202
