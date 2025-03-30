@@ -14,6 +14,18 @@ INIT_SCRIPT="/etc/init.d/frpc"
 mkdir -p $FRP_DIR
 cd $FRP_DIR
 
+echo -e "${GREEN}Проверяю, не занят ли файл frpc...${NC}"
+if [ -f "$FRP_DIR/frpc" ]; then
+    echo -e "${RED}Файл frpc уже существует, пытаюсь удалить...${NC}"
+    rm -f "$FRP_DIR/frpc"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Файл frpc успешно удалён.${NC}"
+    else
+        echo -e "${RED}Не удалось удалить файл frpc. Прерываю выполнение.${NC}"
+        exit 1
+    fi
+fi
+
 echo -e "${GREEN}Скачиваю frpc с GitHub...${NC}"
 if curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o "frpc"; then
     echo -e "${GREEN}Файл frpc успешно скачан.${NC}"
