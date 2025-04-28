@@ -44,12 +44,12 @@ else
 fi
 
 # Запрашиваем параметры для frpc.toml
-echo -e "${GREEN}Введите имя для прокси Luci (например: Home Luci):${NC}"
+echo -e "${GREEN}Введите имя для прокси Luci (например: Home_Luci):${NC}"
 read luci_name
 echo -e "${GREEN}Введите порт для прокси Luci (например: 8081):${NC}"
 read luci_port
 
-echo -e "${GREEN}Введите имя для прокси SSH (например: Home SSH):${NC}"
+echo -e "${GREEN}Введите имя для прокси SSH (например: Home_SSH):${NC}"
 read ssh_name
 echo -e "${GREEN}Введите порт для прокси SSH (например: 2201):${NC}"
 read ssh_port
@@ -100,7 +100,8 @@ start_service() {
     procd_set_param command "\$PROG" -c "\$CONFIG_FILE"
     procd_set_param stdout 1
     procd_set_param stderr 1
-    procd_set_param pidfile "/var/run/\$NAME.pid"
+    procd_set_param respawn 3600 5 0
+    procd_set_param dependencies network
     procd_close_instance
 }
 
@@ -109,7 +110,7 @@ shutdown() {
 }
 
 service_triggers() {
-    procd_add_reload_trigger "\$NAME"
+    procd_add_reload_trigger "\$CONFIG_FILE"
 }
 EOF
 
@@ -122,22 +123,18 @@ else
     exit 1
 fi
 
-# Добавляем в автозагрузку
-echo -e "${GREEN}Добавляю в автозагрузку...${NC}"
-if /etc/init.d/frpc enable; then
-    echo -e "${GREEN}Служба успешно добавлена в автозагрузку.${NC}"
-else
-    echo -e "${RED}Не удалось добавить службу в автозагрузку.${NC}"
-    exit 1
-fi
+# Перерегистрируем службу
+echo -e "${GREEN}Добавляю службу в автозагрузку...${NC}"
+/etc/init.d/frpc disable
+/etc/init.d/frpc enable
 
 # Запускаем сервис
 echo -e "${GREEN}Запускаю сервис...${NC}"
-if /etc/init.d/frpc start; then
+if /etc/init.d/frpc restart; then
     echo -e "${GREEN}Сервис успешно запущен.${NC}"
 else
     echo -e "${RED}Не удалось запустить сервис.${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}Готово!${NC}"
+echo -e "${GREEN}Готово! Установка завершена.${NC}"
