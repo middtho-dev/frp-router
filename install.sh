@@ -10,53 +10,39 @@ GITHUB_REPO="middtho-dev/frp-router"
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 
-# Скачиваем файл frpc
-mkdir -p $FRP_DIR
-cd $FRP_DIR
+# Создаем каталог
+mkdir -p "$FRP_DIR"
+cd "$FRP_DIR" || exit 1
 
-echo -e "${GREEN}Проверяю, не занят ли файл frpc...${NC}"
+# Удаляем старый frpc, если он есть
+echo -e "${GREEN}Проверяю наличие старого frpc...${NC}"
 if [ -f "$FRP_DIR/frpc" ]; then
-    echo -e "${RED}Файл frpc уже существует, пытаюсь удалить...${NC}"
+    echo -e "${RED}Удаляю старый frpc...${NC}"
     rm -f "$FRP_DIR/frpc"
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}Файл frpc успешно удалён.${NC}"
-    else
-        echo -e "${RED}Не удалось удалить файл frpc. Прерываю выполнение.${NC}"
-        exit 1
-    fi
 fi
 
+# Скачиваем frpc
 echo -e "${GREEN}Скачиваю frpc с GitHub...${NC}"
-if curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o "frpc"; then
-    echo -e "${GREEN}Файл frpc успешно скачан.${NC}"
-else
-    echo -e "${RED}Ошибка при загрузке файла frpc с GitHub.${NC}"
+if ! curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o "$FRP_DIR/frpc"; then
+    echo -e "${RED}Ошибка загрузки frpc!${NC}"
     exit 1
 fi
 
-# Даем права на frpc
-echo -e "${GREEN}Даю права на frpc...${NC}"
-if chmod +x $FRP_DIR/frpc; then
-    echo -e "${GREEN}Права успешно установлены на frpc.${NC}"
-else
-    echo -e "${RED}Не удалось установить права на frpc.${NC}"
-    exit 1
-fi
+chmod +x "$FRP_DIR/frpc"
 
-# Запрашиваем параметры для frpc.toml
-echo -e "${GREEN}Введите имя для прокси Luci (например: Home_Luci):${NC}"
-read luci_name
-echo -e "${GREEN}Введите порт для прокси Luci (например: 8081):${NC}"
-read luci_port
+# Запрашиваем настройки
+echo -e "${GREEN}Введите имя прокси Luci:${NC}"
+read -r luci_name
+echo -e "${GREEN}Введите порт для прокси Luci:${NC}"
+read -r luci_port
 
-echo -e "${GREEN}Введите имя для прокси SSH (например: Home_SSH):${NC}"
-read ssh_name
-echo -e "${GREEN}Введите порт для прокси SSH (например: 2201):${NC}"
-read ssh_port
+echo -e "${GREEN}Введите имя прокси SSH:${NC}"
+read -r ssh_name
+echo -e "${GREEN}Введите порт для прокси SSH:${NC}"
+read -r ssh_port
 
 # Создаем frpc.toml
-echo -e "${GREEN}Создаю файл frpc.toml...${NC}"
-cat <<EOF > $FRP_DIR/frpc.toml
+cat <<EOF > "$FRP_DIR/frpc.toml"
 serverAddr = "router.kv9.ru"
 serverPort = 7000
 
@@ -74,67 +60,83 @@ localPort = 22
 remotePort = $ssh_port
 EOF
 
-# Проверка на успешное создание frpc.toml
-if [[ -f $FRP_DIR/frpc.toml ]]; then
-    echo -e "${GREEN}Файл frpc.toml успешно создан.${NC}"
-else
-    echo -e "${RED}Не удалось создать файл frpc.toml.${NC}"
-    exit 1
-fi
+echo -e "${GREEN}Файл конфигурации frpc.toml создан.${NC}"
 
-# Создаем init.d скрипт
-echo -e "${GREEN}Создаю init.d скрипт...${NC}"
-cat <<EOF > $INIT_SCRIPT
+# Создаем init.d скрипт для OpenWrt
+cat <<'EOF' > "$INIT_SCRIPT"
 #!/bin/sh /etc/rc.common
 
 START=97
-STOP=50
+STOP=10
 USE_PROCD=1
 
-NAME=frpc
-PROG=$FRP_DIR/frpc
-CONFIG_FILE=$FRP_DIR/frpc.toml
+FRPC_BIN="/root/frp/frpc"
+FRPC_CFG="/root/frp/frpc.toml"
 
 start_service() {
     procd_open_instance
-    procd_set_param command "\$PROG" -c "\$CONFIG_FILE"
+    procd_set_param command "$FRPC_BIN" -c "$FRPC_CFG"
+    procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
-    procd_set_param respawn 3600 5 0
-    procd_set_param dependencies network
+    procd_set_param pidfile "/var/run/frpc.pid"
     procd_close_instance
 }
 
-shutdown() {
-    killall "\$NAME"
-}
-
-service_triggers() {
-    procd_add_reload_trigger "\$CONFIG_FILE"
+stop_service() {
+    killall frpc
 }
 EOF
 
-# Устанавливаем права на init.d скрипт
-echo -e "${GREEN}Устанавливаю права на init.d скрипт...${NC}"
-if chmod +x $INIT_SCRIPT; then
-    echo -e "${GREEN}Права успешно установлены на init.d скрипт.${NC}"
-else
-    echo -e "${RED}Не удалось установить права на init.d скрипт.${NC}"
-    exit 1
-fi
+chmod +x "$INIT_SCRIPT"
 
-# Перерегистрируем службу
-echo -e "${GREEN}Добавляю службу в автозагрузку...${NC}"
-/etc/init.d/frpc disable
+# Добавляем в автозагрузку и запускаем
 /etc/init.d/frpc enable
+/etc/init.d/frpc restart
 
-# Запускаем сервис
-echo -e "${GREEN}Запускаю сервис...${NC}"
-if /etc/init.d/frpc restart; then
-    echo -e "${GREEN}Сервис успешно запущен.${NC}"
-else
-    echo -e "${RED}Не удалось запустить сервис.${NC}"
-    exit 1
+echo -e "${GREEN}Установка и настройка завершены.${NC}"
+
+# Создаем watchdog скрипт
+cat <<'EOF' > /root/frpc_watchdog.sh
+#!/bin/sh
+
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
+
+FRPC_BIN="/root/frp/frpc"
+INIT_SCRIPT="/etc/init.d/frpc"
+LOG_FILE="/root/frpc_watchdog.log"
+DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Проверка процесса frpc
+if ! pgrep -f "$FRPC_BIN" > /dev/null; then
+    MESSAGE="⚠️ $DATE_NOW - FRPC не работает на $(uname -n)! Перезапускаю..."
+    echo "$MESSAGE" >> "$LOG_FILE"
+    wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+
+    if [ -x "$INIT_SCRIPT" ]; then
+        "$INIT_SCRIPT" restart
+
+        sleep 5
+        if pgrep -f "$FRPC_BIN" > /dev/null; then
+            MESSAGE="✅ $DATE_NOW - FRPC успешно перезапущен."
+        else
+            MESSAGE="❌ $DATE_NOW - Ошибка: FRPC не запустился!"
+        fi
+        echo "$MESSAGE" >> "$LOG_FILE"
+        wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+    else
+        MESSAGE="❌ $DATE_NOW - Init.d скрипт $INIT_SCRIPT не найден!"
+        echo "$MESSAGE" >> "$LOG_FILE"
+        wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+    fi
 fi
+EOF
 
-echo -e "${GREEN}Готово! Установка завершена.${NC}"
+chmod +x /root/frpc_watchdog.sh
+
+# Добавляем watchdog в cron
+echo "*/5 * * * * /root/frpc_watchdog.sh" >> /etc/crontabs/root
+/etc/init.d/cron restart
+
+echo -e "${GREEN}Watchdog для frpc настроен!${NC}"
