@@ -168,10 +168,10 @@ echo -e "${GREEN}Запускаю сервис...${NC}"
 if /etc/init.d/frpc start; then
     echo -e "${GREEN}Сервис успешно запущен.${NC}"
     # Отправляем уведомление в Telegram
-    IP_ADDR=\$(curl -s ifconfig.me)
-    send_telegram "✅ FRPC успешно установлен на \$(uname -n) (\$IP_ADDR)
-    - Luci: \`$luci_name\` порт \`$luci_port\`
-    - SSH: \`$ssh_name\` порт \`$ssh_port\`"
+    IP_ADDR=$(curl -s ifconfig.me)
+    send_telegram "✅ FRPC успешно установлен на $(uname -n) (${IP_ADDR})
+- Luci: \`${luci_name}\` порт \`${luci_port}\`
+- SSH: \`${ssh_name}\` порт \`${ssh_port}\`"
 else
     echo -e "${RED}Не удалось запустить сервис.${NC}"
     exit 1
@@ -251,7 +251,7 @@ else
 fi
 
 # Настроим cron для запуска watchdog каждые 5 минут
-echo -e "${GREEN}Настроим cron для мониторинга...${NC}"
+echo -e "${GREEN}Настраиваю cron для мониторинга...${NC}"
 if ! crontab -l | grep -q "$WATCHDOG_SCRIPT"; then
     (crontab -l; echo "*/5 * * * * $WATCHDOG_SCRIPT") | crontab -
     echo -e "${GREEN}Cron для мониторинга успешно настроен.${NC}"
