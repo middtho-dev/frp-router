@@ -21,9 +21,9 @@ validate_port() {
     fi
 }
 
-# Функция отправки в Telegram
+# Функция отправки в Telegram с экранированием
 send_telegram() {
-    local message="$1"
+    local message=$(echo "$1" | sed 's/_/\\_/g; s/*/\\*/g; s/`/\\`/g; s/-/\\-/g')
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d text="$message" \
@@ -167,9 +167,8 @@ fi
 echo -e "${GREEN}Запускаю сервис...${NC}"
 if /etc/init.d/frpc start; then
     echo -e "${GREEN}Сервис успешно запущен.${NC}"
-    # Отправляем уведомление в Telegram
     IP_ADDR=$(curl -s ifconfig.me)
-    send_telegram "✅ FRPC успешно установлен на $(uname -n) (${IP_ADDR})
+    send_telegram "✅ FRPC успешно установлен на \$(uname -n) (${IP_ADDR})
 - Luci: \`${luci_name}\` порт \`${luci_port}\`
 - SSH: \`${ssh_name}\` порт \`${ssh_port}\`"
 else
@@ -197,13 +196,12 @@ IP_ADDR=\$(curl -s ifconfig.me)
 echo "\$DATE_NOW - Проверка frpc..." >> "\$LOG_FILE"
 
 if ! pgrep -f "frpc.*toml" > /dev/null; then
-    MESSAGE="⚠️ *\$(uname -n) (\$IP_ADDR)*
+    MESSAGE="⚠️ *\$(uname -n | sed 's/_/\\\\_/g') (\$IP_ADDR)*
 FRPC не работает!
 Время: \$DATE_NOW
 Попытка перезапуска..."
     echo "\$MESSAGE" >> "\$LOG_FILE"
 
-    # Отправка сообщения в Telegram
     RESPONSE=\$(curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
         -d chat_id="\$CHAT_ID" \
         -d text="\$MESSAGE" \
@@ -214,22 +212,14 @@ FRPC не работает!
         sleep 5
         if pgrep -f "frpc.*toml" > /dev/null; then
             STATUS=\$(/etc/init.d/frpc status | grep 'is running')
-            MESSAGE="✅ *\$(uname -n) (\$IP_ADDR)*
+            MESSAGE="✅ *\$(uname -n | sed 's/_/\\\\_/g') (\$IP_ADDR)*
 FRPC успешно перезапущен!
 Статус: \$STATUS"
         else
-            MESSAGE="❌ *\$(uname -n) (\$IP_ADDR)*
+            MESSAGE="❌ *\$(uname -n | sed 's/_/\\\\_/g') (\$IP_ADDR)*
 Ошибка перезапуска FRPC!
 Проверьте систему!"
         fi
-        echo "\$MESSAGE" >> "\$LOG_FILE"
-        RESPONSE=\$(curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
-            -d chat_id="\$CHAT_ID" \
-            -d text="\$MESSAGE" \
-            -d parse_mode="Markdown")
-    else
-        MESSAGE="❌ *\$(uname -n) (\$IP_ADDR)*
-Init.d скрипт /etc/init.d/frpc не найден!"
         echo "\$MESSAGE" >> "\$LOG_FILE"
         RESPONSE=\$(curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
             -d chat_id="\$CHAT_ID" \
