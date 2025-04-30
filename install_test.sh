@@ -1,30 +1,32 @@
 #!/bin/bash
 
-# Цвета
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Переменные
 GITHUB_REPO="middtho-dev/frp-router"
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
-# Установка зависимостей
-echo -e "${GREEN}Проверка зависимостей...${NC}"
+# Проверка curl и wget
+echo -e "${GREEN}Проверяю, установлены ли curl и wget...${NC}"
 opkg update
-opkg install curl wget bash coreutils-base64 coreutils-nohup
+command -v curl &> /dev/null || opkg install curl
+command -v wget &> /dev/null || opkg install wget
 
-# Скачиваем frpc
+# Проверка jq
+command -v jq &> /dev/null || opkg install jq
+
+# Загрузка frpc
 mkdir -p $FRP_DIR
 cd $FRP_DIR
-rm -f frpc
-curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o "frpc"
+[ -f frpc ] && rm -f frpc
+curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o frpc
 chmod +x frpc
 
-# Ввод данных
+# Ввод параметров
 echo -e "${GREEN}Введите имя для прокси Luci:${NC}"
 read luci_name
 echo -e "${GREEN}Введите порт для прокси Luci:${NC}"
@@ -53,9 +55,10 @@ localPort = 22
 remotePort = $ssh_port
 EOF
 
-# Init-скрипт
+# Создание init.d скрипта
 cat <<EOF > $INIT_SCRIPT
 #!/bin/sh /etc/rc.common
+
 START=97
 STOP=50
 USE_PROCD=1
@@ -76,135 +79,83 @@ start_service() {
 shutdown() {
     killall "\$NAME"
 }
+
+service_triggers() {
+    procd_add_reload_trigger "\$NAME"
+}
 EOF
 
 chmod +x $INIT_SCRIPT
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
-# Получение IP и имя хоста
-EXTERNAL_IP=$(curl -s https://api.ipify.org)
-HOSTNAME=$(uname -n)
+# Telegram уведомление
+WAN_IP=$(ip -4 addr show dev eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || curl -s https://api.ipify.org)
+DEVICE_NAME=$(uname -n)
 
-# Уведомление о запуске
 MESSAGE="✅ *FRPC установлен и запущен!*
-🏷 Устройство: \`$HOSTNAME\`
-☁️ WAN: \`$EXTERNAL_IP\`
+🪧 *Устройство:* \`$DEVICE_NAME\`
+☁️ *WAN:* \`$WAN_IP\`
 
-📦 *Прокси настроены:*
-• Luci: \`$luci_name\` → порт \`$luci_port\`
-• SSH: \`$ssh_name\` → порт \`$ssh_port\`"
+🔌 *Прокси Luci:* \`$luci_name\` — порт \`$luci_port\`
+🔐 *Прокси SSH:* \`$ssh_name\` — порт \`$ssh_port\`"
 
-curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-  -d chat_id="$CHAT_ID" \
-  -d text="$MESSAGE" \
-  -d parse_mode="Markdown"
+wget -qO- --post-data="chat_id=$CHAT_ID&text=$(echo -e "$MESSAGE")&parse_mode=Markdown" \
+  "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 
-# watchdog скрипт
-WATCHDOG_SCRIPT="/root/frpc_watchdog.sh"
-cat <<EOF > $WATCHDOG_SCRIPT
+# Установка watchdog
+cat <<'EOF' > /root/frpc_watchdog.sh
 #!/bin/sh
 
-BOT_TOKEN="$BOT_TOKEN"
-CHAT_ID="$CHAT_ID"
-FRPC_BIN="$FRP_DIR/frpc"
-LOG="/root/frpc_watchdog.log"
-EXTERNAL_IP=\$(curl -s https://api.ipify.org)
-HOSTNAME=\$(uname -n)
-DATE=\$(date '+%Y-%m-%d %H:%M:%S')
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
+FRPC_BIN="/root/frp/frpc"
+LOG_FILE="/root/frpc_watchdog.log"
+DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
+WAN_IP=$(ip -4 addr show dev eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || curl -s https://api.ipify.org)
 
-if ! pgrep -f "\$FRPC_BIN" > /dev/null; then
-    echo "\$DATE - FRPC не работает. Перезапуск..." >> "\$LOG"
-    wget -qO- --post-data="chat_id=\$CHAT_ID&text=⚠️ *FRPC упал. Перезапуск...*
-🏷 \\\`\$HOSTNAME\\\`
-☁️ WAN: \\\`\$EXTERNAL_IP\\\`&parse_mode=Markdown" \
-    "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
-    
+if ! pgrep -f "$FRPC_BIN" > /dev/null; then
+    MSG="⚠️ $DATE_NOW - FRPC не работает! WAN: $WAN_IP. Перезапускаю..."
+    echo "$MSG" >> "$LOG_FILE"
+    wget -qO- --post-data="chat_id=$CHAT_ID&text=$MSG" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
     /etc/init.d/frpc restart
-
-    sleep 3
-    if pgrep -f "\$FRPC_BIN" > /dev/null; then
-        MSG="✅ *FRPC перезапущен*
-🏷 \\\`\$HOSTNAME\\\`
-☁️ WAN: \\\`\$EXTERNAL_IP\\\`"
-    else
-        MSG="❌ *Не удалось перезапустить FRPC*
-🏷 \\\`\$HOSTNAME\\\`"
-    fi
-
-    wget -qO- --post-data="chat_id=\$CHAT_ID&text=\$MSG&parse_mode=Markdown" \
-    "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
 else
-    echo "\$DATE - FRPC работает" >> "\$LOG"
+    echo "$DATE_NOW - FRPC работает. WAN: $WAN_IP" >> "$LOG_FILE"
 fi
 EOF
 
-chmod +x $WATCHDOG_SCRIPT
+chmod +x /root/frpc_watchdog.sh
 
-# Cron для watchdog
-crontab -l | grep -v frpc_watchdog.sh > /tmp/crontab_tmp
-echo "*/5 * * * * $WATCHDOG_SCRIPT" >> /tmp/crontab_tmp
-crontab /tmp/crontab_tmp
-rm /tmp/crontab_tmp
+# Добавляем в cron
+crontab -l | grep -q frpc_watchdog.sh || (crontab -l; echo "*/5 * * * * /root/frpc_watchdog.sh") | crontab -
 
-# Команды Telegram-бота
-BOT_HANDLER="/root/frpc_bot.sh"
-cat <<EOF > $BOT_HANDLER
+# Telegram-бот
+cat <<'EOF' > /root/frpc_bot.sh
 #!/bin/bash
 
-BOT_TOKEN="$BOT_TOKEN"
-CHAT_ID="$CHAT_ID"
-OFFSET=0
-
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
 while true; do
-  UPDATES=\$(curl -s "https://api.telegram.org/bot\$BOT_TOKEN/getUpdates?offset=\$OFFSET")
-  for row in \$(echo \$UPDATES | jq -c '.result[]'); do
-    OFFSET=\$(echo \$row | jq '.update_id + 1')
-    TEXT=\$(echo \$row | jq -r '.message.text')
-    CID=\$(echo \$row | jq -r '.message.chat.id')
+  UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
+  LAST=$(echo "$UPDATES" | jq -r '.result[-1]')
+  TEXT=$(echo "$LAST" | jq -r '.message.text')
+  ID=$(echo "$LAST" | jq -r '.message.message_id')
 
-    EXTERNAL_IP=\$(curl -s https://api.ipify.org)
-    HOSTNAME=\$(uname -n)
+  if [[ "$TEXT" == "/status" ]]; then
+    WAN=$(ip -4 addr show dev eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || curl -s https://api.ipify.org)
+    HOST=$(uname -n)
+    MSG="📡 Устройство: \`$HOST\`\n🌐 WAN: \`$WAN\`"
+    curl -s "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+         -d chat_id="$CHAT_ID" -d text="$MSG" -d parse_mode="Markdown"
+  fi
 
-    case "\$TEXT" in
-      "/status")
-        if pgrep -f "frpc" > /dev/null; then
-          MSG="✅ *FRPC работает*
-🏷 \\\`\$HOSTNAME\\\`
-☁️ WAN: \\\`\$EXTERNAL_IP\\\`"
-        else
-          MSG="❌ *FRPC остановлен*
-🏷 \\\`\$HOSTNAME\\\`"
-        fi
-        ;;
-      "/restart")
-        /etc/init.d/frpc restart
-        MSG="♻️ *FRPC перезапущен*"
-        ;;
-      "/ip")
-        MSG="☁️ WAN IP: \\\`\$EXTERNAL_IP\\\`"
-        ;;
-      "/uptime")
-        UPTIME=\$(uptime | sed 's/.*up \([^,]*\),.*/\1/')
-        MSG="⏱ *Аптайм*: \\\`\$UPTIME\\\`"
-        ;;
-      *)
-        MSG="Команды:
-/status — статус FRPC
-/restart — перезапуск FRPC
-/ip — WAN IP
-/uptime — аптайм"
-        ;;
-    esac
-
-    curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
-      -d chat_id="\$CID" -d text="\$MSG" -d parse_mode="Markdown"
-  done
-  sleep 5
+  sleep 10
 done
 EOF
 
-chmod +x $BOT_HANDLER
-nohup bash $BOT_HANDLER >/dev/null 2>&1 &
+chmod +x /root/frpc_bot.sh
 
-echo -e "${GREEN}Установка завершена. FRPC работает, Telegram уведомления и команды активны.${NC}"
+# Добавляем бот в автозагрузку
+grep -q frpc_bot.sh /etc/rc.local || sed -i '$i nohup bash /root/frpc_bot.sh &' /etc/rc.local
+
+echo -e "${GREEN}Готово! FRPC установлен, настроен и Telegram уведомления включены.${NC}"
