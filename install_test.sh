@@ -1,57 +1,57 @@
 #!/bin/bash
+#
+# install.sh — установка frpc + watchdog + Telegram‑уведомления
+# Обновлено: 2025‑05‑08
 
-# Цвета
+set -e
+
+# === Цвета ===
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Параметры
+# === Параметры ===
 GITHUB_REPO="middtho-dev/frp-router"
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 WATCHDOG_SCRIPT="/root/frpc_watchdog.sh"
-LOG_FILE="/root/frpc_watchdog.log"
+CRON_FILE="/etc/cron.d/frpc_watchdog"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
-echo -e "${GREEN}Проверка наличия curl и wget...${NC}"
-opkg update
-opkg install curl wget -qq
+# === Проверка утилит ===
+echo -e "${GREEN}Проверяю curl и wget...${NC}"
+for cmd in curl wget; do
+  if ! command -v $cmd &> /dev/null; then
+    echo -e "${RED}$cmd не найден, устанавливаю...${NC}"
+    opkg update && opkg install $cmd
+  fi
+done
 
-mkdir -p $FRP_DIR && cd $FRP_DIR
+# === Скачиваем frpc ===
+echo -e "${GREEN}Подготовка каталога и загрузка frpc...${NC}"
+mkdir -p "$FRP_DIR"
+cd "$FRP_DIR"
 
-echo -e "${GREEN}Удаление старого frpc, если существует...${NC}"
-rm -f "$FRP_DIR/frpc"
-
-echo -e "${GREEN}Скачивание frpc...${NC}"
-curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o "frpc" || {
-    echo -e "${RED}Ошибка загрузки frpc.${NC}"; exit 1;
-}
-chmod +x frpc
-
-# Получение параметров от пользователя
-echo -e "${GREEN}Введите имя устройства (например: SVetrov):${NC}"
-read device_name
-echo -e "${GREEN}Введите номер устройства (двузначный, например: 11):${NC}"
-read device_number
-
-# Проверка корректности номера
-if ! [[ "$device_number" =~ ^[0-9]{2}$ ]]; then
-  echo -e "${RED}Номер устройства должен быть двузначным числом (например: 01, 12, 45).${NC}"
-  exit 1
+if [ -f frpc ]; then
+  echo -e "${RED}Удаляю старый frpc...${NC}"
+  rm -f frpc
 fi
 
-luci_name="${device_name}_Luci"
-ssh_name="${device_name}_SSH"
-luci_port="80${device_number}"
-ssh_port="22${device_number}"
+curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o frpc \
+  && echo -e "${GREEN}frpc скачан.${NC}" \
+  || { echo -e "${RED}Ошибка загрузки frpc!${NC}"; exit 1; }
 
-echo -e "${GREEN}Сформированы параметры:${NC}"
-echo -e "  Luci: $luci_name → порт $luci_port"
-echo -e "  SSH:  $ssh_name → порт $ssh_port"
+chmod +x frpc
 
-# Создание конфигурации
-cat <<EOF > frpc.toml
+# === Конфиг frpc.toml ===
+echo -e "${GREEN}Настройка frpc.toml...${NC}"
+read -p "Имя прокси Luci (например: Home_Luci): " luci_name
+read -p "Удалённый порт Luci (например: 8081): " luci_port
+read -p "Имя прокси SSH (например: Home_SSH): " ssh_name
+read -p "Удалённый порт SSH (например: 2201): " ssh_port
+
+cat > frpc.toml <<EOF
 serverAddr = "router.kv9.ru"
 serverPort = 7000
 
@@ -69,80 +69,87 @@ localPort = 22
 remotePort = $ssh_port
 EOF
 
-# Создание init.d скрипта
-cat <<EOF > $INIT_SCRIPT
-#!/bin/sh /etc/rc.common
+echo -e "${GREEN}frpc.toml создан.${NC}"
 
+# === Init.d скрипт ===
+echo -e "${GREEN}Создание /etc/init.d/frpc...${NC}"
+cat > "$INIT_SCRIPT" <<'EOF'
+#!/bin/sh /etc/rc.common
 START=97
 STOP=50
 USE_PROCD=1
 
 NAME=frpc
-PROG=$FRP_DIR/frpc
-CONFIG_FILE=$FRP_DIR/frpc.toml
+PROG=/root/frp/frpc
+CONFIG_FILE=/root/frp/frpc.toml
 
 start_service() {
     procd_open_instance
-    procd_set_param command "\$PROG" -c "\$CONFIG_FILE"
+    procd_set_param command "$PROG" -c "$CONFIG_FILE"
     procd_set_param stdout 1
     procd_set_param stderr 1
-    procd_set_param pidfile "/var/run/\$NAME.pid"
+    procd_set_param pidfile "/var/run/$NAME.pid"
     procd_close_instance
 }
 
 shutdown() {
-    killall "\$NAME"
+    killall "$NAME"
 }
 
 service_triggers() {
-    procd_add_reload_trigger "\$NAME"
+    procd_add_reload_trigger "$NAME"
 }
 EOF
 
-chmod +x $INIT_SCRIPT
+chmod +x "$INIT_SCRIPT"
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
-# Watchdog скрипт
-cat <<EOF > $WATCHDOG_SCRIPT
+# === Watchdog‑скрипт ===
+echo -e "${GREEN}Создание watchdog скрипта...${NC}"
+cat > "$WATCHDOG_SCRIPT" <<EOF
 #!/bin/sh
+# frpc_watchdog.sh — проверяет и перезапускает frpc, шлёт Telegram‑уведомления
 
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
-FRPC_BIN="$FRP_DIR/frpc"
+FRP_BIN="$FRP_DIR/frpc"
+LOG_FILE="/root/frpc_watchdog.log"
 DATE_NOW=\$(date '+%Y-%m-%d %H:%M:%S')
 
-if ! pgrep -f "\$FRPC_BIN" > /dev/null; then
-    MSG="⚠️ \$DATE_NOW - FRPC не работает на \$(uname -n)! Перезапускаю..."
+echo "\$DATE_NOW Проверка frpc..." >> "\$LOG_FILE"
+
+if ! pgrep -f "\$FRP_BIN" > /dev/null; then
+    MSG="⚠️ \$DATE_NOW FRPC не работает на \$(uname -n)! Перезапускаю..."
+    echo "\$MSG" >> "\$LOG_FILE"
     curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
-         -d "chat_id=\$CHAT_ID" --data-urlencode "text=\$MSG"
-    /etc/init.d/frpc restart
-    sleep 3
-    if pgrep -f "\$FRPC_BIN" > /dev/null; then
-        MSG="✅ \$DATE_NOW - FRPC успешно перезапущен."
+        -d chat_id="\$CHAT_ID" \
+        -d text="\$MSG"
+
+    /etc/init.d/frpc restart && sleep 5
+
+    if pgrep -f "\$FRP_BIN" > /dev/null; then
+        MSG="✅ \$DATE_NOW FRPC успешно перезапущен."
     else
-        MSG="❌ \$DATE_NOW - FRPC не удалось запустить."
+        MSG="❌ \$DATE_NOW Ошибка: FRPC не запустился!"
     fi
+    echo "\$MSG" >> "\$LOG_FILE"
     curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \
-         -d "chat_id=\$CHAT_ID" --data-urlencode "text=\$MSG"
+        -d chat_id="\$CHAT_ID" \
+        -d text="\$MSG"
+else
+    MSG="✅ \$DATE_NOW FRPC работает."
+    echo "\$MSG" >> "\$LOG_FILE"
 fi
 EOF
 
-chmod +x $WATCHDOG_SCRIPT
+chmod +x "$WATCHDOG_SCRIPT"
 
-# Настройка cron
-if ! grep -q "$WATCHDOG_SCRIPT" /etc/crontabs/root; then
-    echo "*/1 * * * * $WATCHDOG_SCRIPT" >> /etc/crontabs/root
-    /etc/init.d/cron enable
-    /etc/init.d/cron restart
-    echo -e "${GREEN}Cron успешно настроен на каждую минуту.${NC}"
-else
-    echo -e "${RED}Cron уже содержит задачу для watchdog.${NC}"
-fi
+# === Системный cron (каждую минуту) ===
+echo -e "${GREEN}Настройка cron каждые 1 минуту...${NC}"
+cat > "$CRON_FILE" <<EOF
+* * * * * root $WATCHDOG_SCRIPT >> /var/log/frpc_watchdog.log 2>&1
+EOF
+chmod 644 "$CRON_FILE"
 
-# Уведомление о первом запуске
-curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-    -d chat_id="$CHAT_ID" \
-    --data-urlencode "text=✅ FRPC установлен и запущен на $(uname -n) ($device_name, №$device_number)"
-
-echo -e "${GREEN}Установка и настройка завершены.${NC}"
+echo -e "${GREEN}Установка и настройка завершены!${NC}"
