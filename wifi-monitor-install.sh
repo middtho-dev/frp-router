@@ -1,102 +1,95 @@
-#!/bin/sh
+#!/bin/bash
 
-# Конфигурация
-BOT_TOKEN='6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY'
-ADMIN_CHAT_ID='382094545'
-HOSTNAME="$(uci get system.@system[0].hostname)"
+# Цвета
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m'
 
-send_telegram() {
-    local MSG="$1"
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-        -d "chat_id=${ADMIN_CHAT_ID}" \
-        -d "text=${MSG}" \
-        -d "disable_notification=true" \
-        -d "parse_mode=Markdown"
-}
+# Параметры
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
+WIFI_MONITOR_SCRIPT="/root/wifi_monitor.sh"
+INIT_WIFI="/etc/init.d/wifi_monitor"
 
-echo "📦 Обновление пакетов и установка зависимостей..."
-opkg update
-opkg install iw curl arp-scan
+# Хост и IP
+HOSTNAME=$(uname -n)
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5}')
+WAN_IP=$(ip -4 addr show $WAN_IFACE | awk '/inet / {print $2}' | cut -d/ -f1)
 
-echo "📝 Создание скрипта мониторинга..."
-cat << 'EOF' > /usr/bin/wifi-monitor.sh
+# Пакеты
+echo -e "${GREEN}Проверяю пакеты...${NC}"
+for pkg in curl wget hostapd-utils jq; do
+    if ! command -v $pkg &>/dev/null; then
+        echo -e "${RED}Устанавливаю $pkg...${NC}"
+        opkg update && opkg install $pkg
+    fi
+done
+
+# Wi-Fi мониторинг скрипт
+echo -e "${GREEN}Создаю скрипт Wi-Fi мониторинга...${NC}"
+cat <<'EOF' > "$WIFI_MONITOR_SCRIPT"
 #!/bin/sh
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-HOSTNAME="$(uci get system.@system[0].hostname)"
+HOSTNAME=$(uname -n)
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5}')
+WAN_IP=$(ip -4 addr show $WAN_IFACE | awk '/inet / {print $2}' | cut -d/ -f1)
 
-send_msg() {
-    local MSG="$1"
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-        -d "chat_id=${CHAT_ID}" \
-        -d "text=${MSG}" \
-        -d "disable_notification=true" \
-        -d "parse_mode=Markdown"
-}
+IFACE=$1
+EVENT=$2
+MAC=$3
 
-get_connected_clients() {
-    iwinfo | grep 'ESSID' | awk -F': ' '{print $2}' | while read SSID; do
-        for iface in $(iw dev | awk '/Interface/ {print $2}'); do
-            iw dev "$iface" station dump 2>/dev/null | grep Station | awk '{print $2}'
-        done
-    done
-}
+if [ "$EVENT" = "AP-STA-CONNECTED" ]; then
+    STATUS="Подключение к Wi-Fi"
+    ICON="🔌"
+elif [ "$EVENT" = "AP-STA-DISCONNECTED" ]; then
+    STATUS="Отключение от Wi-Fi"
+    ICON="❌"
+else
+    exit 0
+fi
 
-# Словарь MAC->IP
-declare_clients() {
-    arp-scan --interface=br-lan --localnet 2>/dev/null | awk '/^[0-9]/ {print $1 "|" $2}' > /tmp/mac_list.txt
-}
-
-# Начальное состояние
-declare_clients
-get_connected_clients > /tmp/clients_old.txt
-
-while true; do
-    sleep 5
-    get_connected_clients > /tmp/clients_new.txt
-    declare_clients
-
-    join=$(grep -Fxv -f /tmp/clients_old.txt /tmp/clients_new.txt)
-    leave=$(grep -Fxv -f /tmp/clients_new.txt /tmp/clients_old.txt)
-
-    for mac in $join; do
-        ip=$(grep -i "$mac" /tmp/mac_list.txt | cut -d"|" -f1)
-        name=$(grep -i "$mac" /tmp/mac_list.txt | cut -d"|" -f2)
-        send_msg "✅ *[$HOSTNAME]* Новое подключение:\n📡 *MAC:* \`$mac\`\n🌐 *IP:* \`$ip\`\n🏷️ *Устройство:* $name"
-    done
-
-    for mac in $leave; do
-        send_msg "❌ *[$HOSTNAME]* Отключение клиента:\n📡 *MAC:* \`$mac\`"
-    done
-
-    mv /tmp/clients_new.txt /tmp/clients_old.txt
-done
+IP=$(arp -n | awk -v mac="$MAC" 'tolower($3)==tolower(mac) {print $1}')
+NAME=$(grep -i "$MAC" /tmp/dhcp.leases | awk '{print $4}')
+MESSAGE="$ICON $STATUS. Устройство на $HOSTNAME ($WAN_IP). Имя: ${NAME:-*}. IP: ${IP:-*}. MAC: $MAC"
+wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 EOF
 
-chmod +x /usr/bin/wifi-monitor.sh
+chmod +x "$WIFI_MONITOR_SCRIPT"
 
-echo "🧩 Создание init-скрипта..."
-cat << 'EOF' > /etc/init.d/wifi_monitor
+# Wi-Fi init скрипт
+echo -e "${GREEN}Создаю init.d для Wi-Fi мониторинга...${NC}"
+cat <<EOF > "$INIT_WIFI"
 #!/bin/sh /etc/rc.common
-# WiFi Monitor init
 
-START=99
+START=98
+STOP=20
 
 start() {
-    echo "▶️ Запуск wifi-мониторинга..."
-    /usr/bin/wifi-monitor.sh &
+    echo "Запуск Wi-Fi мониторинга"
+    for iface in \$(iw dev | awk '\$1=="Interface"{print \$2}'); do
+        hostapd_cli -i \$iface -a $WIFI_MONITOR_SCRIPT &  # Запуск мониторинга для каждого интерфейса
+    done
+
+    HOSTNAME=\$(uname -n)
+    WAN_IFACE=\$(ip route get 8.8.8.8 | awk '{print \$5}')
+    WAN_IP=\$(ip -4 addr show \$WAN_IFACE | awk '/inet / {print \$2}' | cut -d/ -f1)
+    MESSAGE="📡 Wi-Fi мониторинг запущен на \$HOSTNAME (\$WAN_IP)"
+    wget -qO- --post-data="chat_id=$CHAT_ID&text=\$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 }
 
 stop() {
-    echo "⏹️ Остановка wifi-мониторинга..."
-    pkill -f wifi-monitor.sh
+    pkill -f hostapd_cli
 }
 EOF
 
-chmod +x /etc/init.d/wifi_monitor
+chmod +x "$INIT_WIFI"
 /etc/init.d/wifi_monitor enable
-/etc/init.d/wifi_monitor start
+/etc/init.d/wifi_monitor restart
 
-send_telegram "⚙️ *[$HOSTNAME]* WiFi-мониторинг установлен и запущен 🎉📡"
-echo "✅ Готово. Мониторинг активен."
+# Уведомление об установке
+MESSAGE="✅ Wi-Fi мониторинг установлен на $HOSTNAME ($WAN_IP)"
+wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+
+echo -e "${GREEN}Установка завершена.${NC}"
