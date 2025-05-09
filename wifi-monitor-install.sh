@@ -1,66 +1,106 @@
 #!/bin/sh
 
-# Переменные
+# WiFi Monitoring Install Script for OpenWRT
+# GitHub: https://github.com/middtho-dev/frp-router/blob/main/wifi-monitor-install.sh
+
+# Telegram Bot Configuration
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-DEVICE_NAME=$(uci get system.@system[0].hostname)
+ROUTER_NAME=$(uci get system.@system[0].hostname)
 
-# Функция для отправки сообщений в Telegram
-send_telegram_message() {
-    local message=$1
-    local api_url="https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
-    local data="chat_id=${CHAT_ID}&text=${message}"
-    curl -s -X POST $api_url -d $data
-}
-
-# Устанавливаем необходимые пакеты
-echo "Установка необходимых пакетов для WiFi мониторинга..."
+# Install required packages
 opkg update
 opkg install hostapd-utils curl
 
-# Создаём скрипт мониторинга
-cat > /etc/init.d/wifi-monitor << EOF
+# Create monitoring script
+cat << 'EOF' > /usr/bin/wifi-monitor.sh
+#!/bin/sh
+
+# WiFi Monitoring Script
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
+ROUTER_NAME=$(uci get system.@system[0].hostname)
+
+send_telegram() {
+    local message="$1"
+    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+        -d chat_id="${CHAT_ID}" \
+        -d text="${message}" \
+        -d disable_notification="false" > /dev/null
+}
+
+# Send startup notification
+send_telegram "🟢 WiFi Monitoring started on ${ROUTER_NAME}"
+
+# Process hostapd events
+hostapd_cli -i $(uci get wireless.@wifi-iface[0].device).$(uci get wireless.@wifi-iface[0].ifname) -a /usr/bin/hostapd-event.sh
+EOF
+
+# Create hostapd event handler
+cat << 'EOF' > /usr/bin/hostapd-event.sh
+#!/bin/sh
+
+# Hostapd Event Handler
+BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+CHAT_ID="382094545"
+ROUTER_NAME=$(uci get system.@system[0].hostname)
+
+send_telegram() {
+    local message="$1"
+    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+        -d chat_id="${CHAT_ID}" \
+        -d text="${message}" \
+        -d disable_notification="false" > /dev/null
+}
+
+case "$1" in
+    AP-STA-CONNECTED)
+        MAC="$2"
+        IP=$(arp -n | grep "$MAC" | awk '{print $1}')
+        HOST=$(grep "$MAC" /tmp/dhcp.leases | awk '{print $4}')
+        [ -z "$HOST" ] && HOST="Unknown"
+        send_telegram "🟢 Device connected to ${ROUTER_NAME}:
+- Device: ${HOST}
+- MAC: ${MAC}
+- IP: ${IP}"
+        ;;
+    AP-STA-DISCONNECTED)
+        MAC="$2"
+        IP=$(arp -n | grep "$MAC" | awk '{print $1}')
+        HOST=$(grep "$MAC" /tmp/dhcp.leases | awk '{print $4}')
+        [ -z "$HOST" ] && HOST="Unknown"
+        send_telegram "🔴 Device disconnected from ${ROUTER_NAME}:
+- Device: ${HOST}
+- MAC: ${MAC}
+- IP: ${IP}"
+        ;;
+esac
+EOF
+
+# Make scripts executable
+chmod +x /usr/bin/wifi-monitor.sh
+chmod +x /usr/bin/hostapd-event.sh
+
+# Create init script
+cat << 'EOF' > /etc/init.d/wifi-monitor
 #!/bin/sh /etc/rc.common
-# Скрипт для мониторинга WiFi
 
 START=99
-STOP=10
+STOP=01
 
 start() {
-    send_telegram_message "Мониторинг WiFi запущен на устройстве ${DEVICE_NAME}"
-    while true; do
-        # Слежение за подключениями через hostapd-cli
-        hostapd_cli -i wlan0 all_sta | while read line; do
-            if echo "$line" | grep -q "STA"; then
-                MAC=$(echo "$line" | awk '{print $2}')
-                IP=$(echo "$line" | awk '{print $3}')
-                DEVICE=$(hostapd_cli -i wlan0 sta_info $MAC | grep 'device' | cut -d' ' -f2)
-                MESSAGE="Устройство подключено:\nMAC: $MAC\nIP: $IP\nDevice: $DEVICE\nHost: ${DEVICE_NAME}"
-                send_telegram_message "$MESSAGE"
-            elif echo "$line" | grep -q "DISCONNECTED"; then
-                MAC=$(echo "$line" | awk '{print $2}')
-                MESSAGE="Устройство отключено:\nMAC: $MAC\nHost: ${DEVICE_NAME}"
-                send_telegram_message "$MESSAGE"
-            fi
-        done
-        sleep 5
-    done
+    /usr/bin/wifi-monitor.sh &
 }
 
 stop() {
-    send_telegram_message "Мониторинг WiFi остановлен на устройстве ${DEVICE_NAME}"
-    # Дополнительные действия при остановке мониторинга
+    killall wifi-monitor.sh
+    killall hostapd-event.sh
 }
-
 EOF
 
-# Делаем скрипт исполнимым
+# Make init script executable and enable it
 chmod +x /etc/init.d/wifi-monitor
-
-# Добавляем в автозагрузку
 /etc/init.d/wifi-monitor enable
-
-# Запускаем мониторинг
 /etc/init.d/wifi-monitor start
 
-echo "WiFi мониторинг установлен и запущен с автозагрузкой."
+echo "WiFi monitoring installation complete!"
