@@ -17,7 +17,8 @@ CHAT_ID="382094545"
 
 # Хост и IP
 HOSTNAME=$(uname -n)
-WAN_IP=$(ip -4 addr show $(ip route get 8.8.8.8 | awk '{print $5}') | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5}')
+WAN_IP=$(ip -4 addr show $WAN_IFACE | awk '/inet / {print $2}' | cut -d/ -f1)
 
 # Пакеты
 echo -e "${GREEN}Проверяю пакеты...${NC}"
@@ -29,8 +30,8 @@ for pkg in curl wget hostapd-utils jq; do
 done
 
 # Каталог frp
-mkdir -p $FRP_DIR
-cd $FRP_DIR
+mkdir -p "$FRP_DIR"
+cd "$FRP_DIR" || exit
 
 # frpc
 echo -e "${GREEN}Загружаю frpc...${NC}"
@@ -49,7 +50,7 @@ read -p "Удалённый порт Luci: " luci_port
 read -p "Имя прокси SSH: " ssh_name
 read -p "Удалённый порт SSH: " ssh_port
 
-cat <<EOF > $FRP_DIR/frpc.toml
+cat <<EOF > "$FRP_DIR/frpc.toml"
 serverAddr = "router.kv9.ru"
 serverPort = 7000
 
@@ -69,7 +70,7 @@ EOF
 
 # frpc init
 echo -e "${GREEN}Создаю init.d для frpc...${NC}"
-cat <<EOF > $INIT_FRPC
+cat <<EOF > "$INIT_FRPC"
 #!/bin/sh /etc/rc.common
 
 START=97
@@ -94,55 +95,55 @@ shutdown() {
 }
 EOF
 
-chmod +x $INIT_FRPC
+chmod +x "$INIT_FRPC"
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
 # watchdog
 echo -e "${GREEN}Создаю watchdog...${NC}"
-cat <<EOF > $WATCHDOG_SCRIPT
+cat <<EOF > "$WATCHDOG_SCRIPT"
 #!/bin/sh
 
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
 FRPC_BIN="$FRP_DIR/frpc"
-DATE_NOW=\$(date '+%Y-%m-%d %H:%M:%S')
 HOSTNAME=\$(uname -n)
-WAN_IP=\$(ip -4 addr show \$(ip route get 8.8.8.8 | awk '{print \$5}') | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}')
+WAN_IFACE=\$(ip route get 8.8.8.8 | awk '{print \$5}')
+WAN_IP=\$(ip -4 addr show \$WAN_IFACE | awk '/inet / {print \$2}' | cut -d/ -f1)
+DATE_NOW=\$(date '+%Y-%m-%d %H:%M:%S')
 
 if ! pgrep -f "\$FRPC_BIN" > /dev/null; then
-    MESSAGE=\$(printf "⚠️ %s\nFRPC не работает на %s (%s)\nПерезапускаю..." "\$DATE_NOW" "\$HOSTNAME" "\$WAN_IP")
+    MESSAGE="⚠️ \$DATE_NOW FRPC не работает на \$HOSTNAME (\$WAN_IP). Перезапускаю..."
     wget -qO- --post-data="chat_id=\$CHAT_ID&text=\$MESSAGE" "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
     /etc/init.d/frpc restart
     sleep 5
 
     if pgrep -f "\$FRPC_BIN" > /dev/null; then
-        MESSAGE=\$(printf "✅ %s\nFRPC перезапущен на %s (%s)" "\$DATE_NOW" "\$HOSTNAME" "\$WAN_IP")
+        MESSAGE="✅ \$DATE_NOW FRPC перезапущен на \$HOSTNAME (\$WAN_IP)"
     else
-        MESSAGE=\$(printf "❌ %s\nFRPC не запущен на %s (%s)!" "\$DATE_NOW" "\$HOSTNAME" "\$WAN_IP")
+        MESSAGE="❌ \$DATE_NOW FRPC не запущен на \$HOSTNAME (\$WAN_IP)!"
     fi
 
     wget -qO- --post-data="chat_id=\$CHAT_ID&text=\$MESSAGE" "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
 fi
 EOF
 
-chmod +x $WATCHDOG_SCRIPT
+chmod +x "$WATCHDOG_SCRIPT"
 
 # Cron
 echo -e "${GREEN}Настраиваю cron...${NC}"
-if ! crontab -l | grep -q "$WATCHDOG_SCRIPT"; then
-    (crontab -l; echo "* * * * * $WATCHDOG_SCRIPT") | crontab -
-fi
+crontab -l 2>/dev/null | grep -v "$WATCHDOG_SCRIPT" | { cat; echo "* * * * * $WATCHDOG_SCRIPT"; } | crontab -
 
 # Wi-Fi мониторинг скрипт
 echo -e "${GREEN}Создаю скрипт Wi-Fi мониторинга...${NC}"
-cat <<'EOF' > $WIFI_MONITOR_SCRIPT
+cat <<'EOF' > "$WIFI_MONITOR_SCRIPT"
 #!/bin/sh
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 HOSTNAME=$(uname -n)
-WAN_IP=$(ip -4 addr show $(ip route get 8.8.8.8 | awk '{print $5}') | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5}')
+WAN_IP=$(ip -4 addr show $WAN_IFACE | awk '/inet / {print $2}' | cut -d/ -f1)
 
 IFACE=$1
 EVENT=$2
@@ -158,17 +159,17 @@ else
     exit 0
 fi
 
-IP=$(arp -n | grep "$MAC" | awk '{print $1}')
+IP=$(arp -n | awk -v mac="$MAC" 'tolower($3)==tolower(mac) {print $1}')
 NAME=$(grep -i "$MAC" /tmp/dhcp.leases | awk '{print $4}')
-MESSAGE=$(printf "%s %s\n📍 Устройство на %s (%s)\n👤 Имя: %s\n🌐 IP: %s\n🆔 MAC: %s" "$ICON" "$STATUS" "$HOSTNAME" "$WAN_IP" "${NAME:-*}" "${IP:-*}" "$MAC")
+MESSAGE="$ICON $STATUS. Устройство на $HOSTNAME ($WAN_IP). Имя: ${NAME:-*}. IP: ${IP:-*}. MAC: $MAC"
 wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 EOF
 
-chmod +x $WIFI_MONITOR_SCRIPT
+chmod +x "$WIFI_MONITOR_SCRIPT"
 
 # Wi-Fi init скрипт
 echo -e "${GREEN}Создаю init.d для Wi-Fi мониторинга...${NC}"
-cat <<EOF > $INIT_WIFI
+cat <<EOF > "$INIT_WIFI"
 #!/bin/sh /etc/rc.common
 
 START=98
@@ -181,7 +182,8 @@ start() {
     done
 
     HOSTNAME=\$(uname -n)
-    WAN_IP=\$(ip -4 addr show \$(ip route get 8.8.8.8 | awk '{print \$5}') | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}')
+    WAN_IFACE=\$(ip route get 8.8.8.8 | awk '{print \$5}')
+    WAN_IP=\$(ip -4 addr show \$WAN_IFACE | awk '/inet / {print \$2}' | cut -d/ -f1)
     MESSAGE="📡 Wi-Fi мониторинг запущен на \$HOSTNAME (\$WAN_IP)"
     wget -qO- --post-data="chat_id=$CHAT_ID&text=\$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 }
@@ -191,14 +193,12 @@ stop() {
 }
 EOF
 
-chmod +x $INIT_WIFI
+chmod +x "$INIT_WIFI"
 /etc/init.d/wifi_monitor enable
-/etc/init.d/wifi_monitor start
+/etc/init.d/wifi_monitor restart
 
 # Уведомление об установке
-MESSAGE="✅ FRPC установлен на $HOSTNAME ($WAN_IP)
-🔹 Luci: $luci_name → :$luci_port
-🔹 SSH: $ssh_name → :$ssh_port"
+MESSAGE="✅ FRPC установлен на $HOSTNAME ($WAN_IP). Luci: $luci_name → :$luci_port. SSH: $ssh_name → :$ssh_port"
 wget -qO- --post-data="chat_id=$CHAT_ID&text=$MESSAGE" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 
 echo -e "${GREEN}Установка завершена.${NC}"
