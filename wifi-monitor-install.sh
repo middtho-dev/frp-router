@@ -1,66 +1,66 @@
 #!/bin/sh
 
-# Задаем переменные
+# Переменные
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-DEVICE_NAME=$(hostname)  # Имя устройства OpenWrt
+DEVICE_NAME=$(uci get system.@system[0].hostname)
+
+# Функция для отправки сообщений в Telegram
+send_telegram_message() {
+    local message=$1
+    local api_url="https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+    local data="chat_id=${CHAT_ID}&text=${message}"
+    curl -s -X POST $api_url -d $data
+}
 
 # Устанавливаем необходимые пакеты
-echo "Установка необходимых пакетов..."
+echo "Установка необходимых пакетов для WiFi мониторинга..."
 opkg update
 opkg install hostapd-utils curl
 
-# Создаем скрипт мониторинга Wi-Fi
-cat << 'EOF' > /usr/bin/wifi_monitor.sh
-#!/bin/sh
-
-# Получаем список подключенных клиентов
-clients=$(hostapd_cli all_sta)
-
-# Цикл для каждого клиента
-echo "$clients" | while read client; do
-    # Извлекаем MAC, IP и имя устройства
-    mac=$(echo "$client" | grep -oP 'sta\=\K([0-9A-F]{2}(:[0-9A-F]{2}){5})')
-    ip=$(echo "$client" | grep -oP 'ip\=\K([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
-    device_name=$(echo "$client" | grep -oP 'name\=\K\w+')
-
-    # Если найдены данные о клиенте
-    if [ -n "$mac" ] && [ -n "$ip" ]; then
-        # Отправка уведомления о подключении через Telegram
-        message="Подключен новый клиент WiFi: \nИмя устройства: $device_name\nMAC-адрес: $mac\nIP-адрес: $ip\nИмя устройства OpenWrt: $DEVICE_NAME"
-        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d chat_id=$CHAT_ID -d text="$message"
-    fi
-done
-EOF
-
-# Делаем скрипт исполнимым
-chmod +x /usr/bin/wifi_monitor.sh
-
-# Добавляем скрипт в автозагрузку
-echo "Добавляем скрипт в автозагрузку..."
-cat << EOF > /etc/init.d/wifi_monitor
+# Создаём скрипт мониторинга
+cat > /etc/init.d/wifi-monitor << EOF
 #!/bin/sh /etc/rc.common
-# Скрипт для запуска Wi-Fi мониторинга
+# Скрипт для мониторинга WiFi
 
 START=99
 STOP=10
 
 start() {
-    echo "Запуск Wi-Fi мониторинга..."
-    /usr/bin/wifi_monitor.sh &
+    send_telegram_message "Мониторинг WiFi запущен на устройстве ${DEVICE_NAME}"
+    while true; do
+        # Слежение за подключениями через hostapd-cli
+        hostapd_cli -i wlan0 all_sta | while read line; do
+            if echo "$line" | grep -q "STA"; then
+                MAC=$(echo "$line" | awk '{print $2}')
+                IP=$(echo "$line" | awk '{print $3}')
+                DEVICE=$(hostapd_cli -i wlan0 sta_info $MAC | grep 'device' | cut -d' ' -f2)
+                MESSAGE="Устройство подключено:\nMAC: $MAC\nIP: $IP\nDevice: $DEVICE\nHost: ${DEVICE_NAME}"
+                send_telegram_message "$MESSAGE"
+            elif echo "$line" | grep -q "DISCONNECTED"; then
+                MAC=$(echo "$line" | awk '{print $2}')
+                MESSAGE="Устройство отключено:\nMAC: $MAC\nHost: ${DEVICE_NAME}"
+                send_telegram_message "$MESSAGE"
+            fi
+        done
+        sleep 5
+    done
 }
 
 stop() {
-    echo "Остановка Wi-Fi мониторинга..."
-    killall wifi_monitor.sh
+    send_telegram_message "Мониторинг WiFi остановлен на устройстве ${DEVICE_NAME}"
+    # Дополнительные действия при остановке мониторинга
 }
+
 EOF
 
-# Делаем скрипт автозагрузки исполнимым
-chmod +x /etc/init.d/wifi_monitor
+# Делаем скрипт исполнимым
+chmod +x /etc/init.d/wifi-monitor
 
-# Включаем и запускаем скрипт
-/etc/init.d/wifi_monitor enable
-/etc/init.d/wifi_monitor start
+# Добавляем в автозагрузку
+/etc/init.d/wifi-monitor enable
 
-echo "Wi-Fi мониторинг успешно установлен и запущен."
+# Запускаем мониторинг
+/etc/init.d/wifi-monitor start
+
+echo "WiFi мониторинг установлен и запущен с автозагрузкой."
