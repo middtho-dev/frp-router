@@ -58,6 +58,9 @@ case "$1" in
 - MAC: ${MAC}
 - IP: ${ip}"
         ;;
+    MONITOR-STARTED)
+        send_telegram "🟢 WiFi Monitoring started on ${ROUTER_NAME}"
+        ;;
 esac
 EOF
 
@@ -68,43 +71,46 @@ cat << 'EOF' > /usr/bin/wifi-monitor.sh
 # WiFi Monitoring Script
 ROUTER_NAME=$(uci get system.@system[0].hostname 2>/dev/null || echo "OpenWRT")
 
-# Find the correct WiFi interface
-find_wifi_interface() {
-    for iface in $(ls /var/run/hostapd* 2>/dev/null); do
-        echo "$iface" | sed 's|/var/run/hostapd/||'
-        return 0
-    done
-    
-    for iface in $(iw dev | awk '/Interface/ {print $2}'); do
-        if iwconfig "$iface" 2>/dev/null | grep -q "Mode:Master"; then
-            echo "$iface"
-            return 0
+# Find active WiFi interfaces
+find_wifi_interfaces() {
+    # Check for ujail-hosted hostapd instances
+    for pid in $(pgrep hostapd); do
+        if grep -q ujail /proc/$pid/cmdline 2>/dev/null; then
+            # Extract interface name from process cmdline
+            grep -oE '\-i [^ ]+' /proc/$pid/cmdline 2>/dev/null | awk '{print $2}' | sort -u
         fi
     done
     
-    return 1
+    # Fallback to traditional method
+    if [ -z "$INTERFACES" ]; then
+        ls /var/run/hostapd/ 2>/dev/null | grep -v '^global$'
+    fi
 }
-
-WIFI_IFACE=$(find_wifi_interface)
-
-if [ -z "$WIFI_IFACE" ]; then
-    echo "ERROR: No WiFi AP interface found"
-    exit 1
-fi
 
 # Send startup notification
 /usr/bin/hostapd-event.sh "MONITOR-STARTED" "$ROUTER_NAME"
 
-# Process hostapd events
+# Monitor all interfaces
 while true; do
-    if [ -e "/var/run/hostapd/$WIFI_IFACE" ]; then
-        hostapd_cli -i "$WIFI_IFACE" -a /usr/bin/hostapd-event.sh
-    elif [ -e "/var/run/hostapd" ]; then
-        hostapd_cli -a /usr/bin/hostapd-event.sh
-    else
-        echo "Hostapd socket not found, waiting..."
+    INTERFACES=$(find_wifi_interfaces)
+    
+    if [ -z "$INTERFACES" ]; then
+        echo "No active WiFi interfaces found, waiting..."
+        sleep 10
+        continue
     fi
-    sleep 5
+
+    for IFACE in $INTERFACES; do
+        # Skip if already monitoring this interface
+        if pgrep -f "hostapd_cli.*${IFACE}" >/dev/null; then
+            continue
+        fi
+        
+        echo "Starting monitoring for interface $IFACE"
+        hostapd_cli -i "$IFACE" -a /usr/bin/hostapd-event.sh >/dev/null 2>&1 &
+    done
+    
+    sleep 30
 done
 EOF
 
@@ -128,6 +134,7 @@ stop() {
     echo "Stopping WiFi monitoring..."
     killall wifi-monitor.sh 2>/dev/null
     killall hostapd-event.sh 2>/dev/null
+    killall hostapd_cli 2>/dev/null
 }
 
 restart() {
@@ -142,8 +149,6 @@ chmod +x /etc/init.d/wifi-monitor
 /etc/init.d/wifi-monitor restart
 
 echo "WiFi monitoring installation complete!"
-echo "Please check if hostapd is running:"
-echo "ps | grep hostapd"
-echo ""
-echo "If hostapd is not running, you may need to restart WiFi:"
-echo "wifi down && wifi up"
+echo "Please wait 1-2 minutes for the system to stabilize"
+echo "Check status with: /etc/init.d/wifi-monitor status"
+echo "View logs with: logread | grep wifi-monitor"
