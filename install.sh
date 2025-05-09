@@ -5,7 +5,7 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Настройки
+# Переменные
 GITHUB_REPO="middtho-dev/frp-router"
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
@@ -14,33 +14,37 @@ WIFI_MONITOR_SCRIPT="/root/wifi_monitor.sh"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
-# Получение информации
+# Имя хоста и WAN IP
 HOSTNAME=$(uname -n)
-WAN_IP=$(ip -4 addr show $(ip route get 8.8.8.8 | awk '{print $5}') | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+WAN_IP=$(ip -4 addr show "$WAN_IFACE" | awk '/inet / {print $2}' | cut -d/ -f1)
 
-# Проверка и установка необходимых пакетов
-echo -e "${GREEN}Проверяю и устанавливаю необходимые пакеты...${NC}"
-REQUIRED_PKGS="curl wget hostapd-utils jq ip-full coreutils arp-scan bash grep awk cut"
-for pkg in $REQUIRED_PKGS; do
-    if ! opkg list-installed | grep -q "^$pkg"; then
-        echo -e "${GREEN}Устанавливаю: $pkg${NC}"
-        opkg update && opkg install "$pkg"
+# Проверка необходимых пакетов
+echo -e "${GREEN}Проверяю наличие необходимых пакетов...${NC}"
+for pkg in curl wget hostapd-utils jq; do
+    if ! command -v $pkg &> /dev/null; then
+        echo -e "${RED}$pkg не найден, устанавливаю...${NC}"
+        opkg update && opkg install $pkg
     fi
 done
 
-# Подготовка и загрузка frpc
-mkdir -p $FRP_DIR && cd $FRP_DIR
-rm -f "$FRP_DIR/frpc"
+# Подготовка каталога и скачивание frpc
+echo -e "${GREEN}Загружаю frpc...${NC}"
+mkdir -p $FRP_DIR
+cd $FRP_DIR
+
+rm -f frpc
 curl -L "https://github.com/$GITHUB_REPO/raw/main/frpc" -o frpc
 chmod +x frpc
 
 # Настройка frpc.toml
+echo -e "${GREEN}Настройка frpc.toml...${NC}"
 read -p "Имя прокси Luci: " luci_name
 read -p "Порт Luci: " luci_port
 read -p "Имя прокси SSH: " ssh_name
 read -p "Порт SSH: " ssh_port
 
-cat <<EOF > $FRP_DIR/frpc.toml
+cat <<EOF > frpc.toml
 serverAddr = "router.kv9.ru"
 serverPort = 7000
 
@@ -58,12 +62,15 @@ localPort = 22
 remotePort = $ssh_port
 EOF
 
-# Init.d скрипт
+# Создание /etc/init.d/frpc
+echo -e "${GREEN}Создаю init-скрипт...${NC}"
 cat <<EOF > $INIT_SCRIPT
 #!/bin/sh /etc/rc.common
+
 START=97
 STOP=50
 USE_PROCD=1
+
 NAME=frpc
 PROG=$FRP_DIR/frpc
 CONFIG_FILE=$FRP_DIR/frpc.toml
@@ -73,82 +80,112 @@ start_service() {
     procd_set_param command "\$PROG" -c "\$CONFIG_FILE"
     procd_set_param stdout 1
     procd_set_param stderr 1
+    procd_set_param pidfile "/var/run/\$NAME.pid"
     procd_close_instance
 }
+
 shutdown() {
     killall "\$NAME"
 }
+
+service_triggers() {
+    procd_add_reload_trigger "\$NAME"
+}
 EOF
+
 chmod +x $INIT_SCRIPT
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
 # Watchdog
+echo -e "${GREEN}Создаю watchdog...${NC}"
 cat <<EOF > $WATCHDOG_SCRIPT
 #!/bin/sh
+
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
 FRPC_BIN="$FRP_DIR/frpc"
-LOG_FILE="/root/frpc_watchdog.log"
-DATE_NOW=\$(date '+%Y-%m-%d %H:%M:%S')
+LOG="/root/frpc_watchdog.log"
+DATE=\$(date '+%Y-%m-%d %H:%M:%S')
 HOSTNAME=\$(uname -n)
-WAN_IP=\$(ip -4 addr show \$(ip route get 8.8.8.8 | awk '{print \$5}') | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}')
+WAN_IFACE=\$(ip route get 8.8.8.8 | awk '{print \$5; exit}')
+WAN_IP=\$(ip -4 addr show \$WAN_IFACE | awk '/inet / {print \$2}' | cut -d/ -f1)
 
 if ! pgrep -f "\$FRPC_BIN" > /dev/null; then
-    MESSAGE="⚠️ \$DATE_NOW\nFRPC не работает на \$HOSTNAME (\$WAN_IP). Перезапускаю..."
-    echo "\$MESSAGE" >> "\$LOG_FILE"
-    curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" -d "chat_id=\$CHAT_ID&text=\$MESSAGE"
+    MSG="⚠️ \$DATE
+FRPC не работает на \$HOSTNAME (\$WAN_IP)
+Перезапускаю..."
+    echo "\$MSG" >> \$LOG
+    wget -qO- --post-data="chat_id=\$CHAT_ID&text=\$MSG" "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
 
     /etc/init.d/frpc restart
     sleep 5
 
     if pgrep -f "\$FRPC_BIN" > /dev/null; then
-        MESSAGE="✅ \$DATE_NOW\nFRPC успешно перезапущен на \$HOSTNAME (\$WAN_IP)."
+        MSG="✅ \$DATE
+FRPC перезапущен на \$HOSTNAME (\$WAN_IP)"
     else
-        MESSAGE="❌ \$DATE_NOW\nОшибка запуска FRPC на \$HOSTNAME (\$WAN_IP)."
+        MSG="❌ \$DATE
+Не удалось запустить FRPC на \$HOSTNAME (\$WAN_IP)"
     fi
-    curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" -d "chat_id=\$CHAT_ID&text=\$MESSAGE"
+    echo "\$MSG" >> \$LOG
+    wget -qO- --post-data="chat_id=\$CHAT_ID&text=\$MSG" "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage"
 fi
 EOF
+
 chmod +x $WATCHDOG_SCRIPT
-(crontab -l 2>/dev/null; echo "* * * * * $WATCHDOG_SCRIPT") | crontab -
+
+# Cron для watchdog
+if ! crontab -l 2>/dev/null | grep -q "$WATCHDOG_SCRIPT"; then
+    (crontab -l 2>/dev/null; echo "* * * * * $WATCHDOG_SCRIPT") | crontab -
+fi
 
 # Wi-Fi мониторинг
+echo -e "${GREEN}Настройка мониторинга Wi-Fi подключений...${NC}"
 cat <<'EOF' > $WIFI_MONITOR_SCRIPT
 #!/bin/sh
+
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 HOSTNAME=$(uname -n)
-WAN_IP=$(ip -4 addr show $(ip route get 8.8.8.8 | awk '{print $5}') | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+WAN_IFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+WAN_IP=$(ip -4 addr show $WAN_IFACE | awk '/inet / {print $2}' | cut -d/ -f1)
+
 IFACE=$1
 EVENT=$2
 MAC=$3
 
-if [ "$EVENT" = "AP-STA-CONNECTED" ]; then
-    STATUS="подключилось"
-elif [ "$EVENT" = "AP-STA-DISCONNECTED" ]; then
-    STATUS="отключилось"
-else
-    exit 0
-fi
+case "$EVENT" in
+    "AP-STA-CONNECTED") STATUS="🔌 Подключение";;
+    "AP-STA-DISCONNECTED") STATUS="❌ Отключение";;
+    *) exit 0;;
+esac
 
-IP=$(arp -n | grep "$MAC" | awk '{print $1}')
-NAME=$(grep -i "$MAC" /tmp/dhcp.leases | awk '{print $4}')
+NAME=$(grep -i "$MAC" /tmp/dhcp.leases | awk '{print $4}' | head -n 1)
+IP=$(grep -i "$MAC" /tmp/dhcp.leases | awk '{print $3}' | head -n 1)
 
-TEXT="📶 Устройство $STATUS к Wi-Fi на $HOSTNAME ($WAN_IP)%0AИмя: ${NAME:-Неизвестно}%0AIP: ${IP:-Неизвестно}%0AMAC: $MAC"
-curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=$CHAT_ID&text=$TEXT"
+MSG="$STATUS к Wi-Fi
+📍 Устройство на $HOSTNAME ($WAN_IP)
+👤 Имя: ${NAME:-Неизвестно}
+🌐 IP: ${IP:-Неизвестно}
+🆔 MAC: $MAC"
+
+wget -qO- --post-data="chat_id=$CHAT_ID&text=$MSG" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 EOF
+
 chmod +x $WIFI_MONITOR_SCRIPT
 
-# Автозапуск Wi-Fi мониторинга
-echo -e "${GREEN}Настройка отслеживания Wi-Fi подключений...${NC}"
+# Привязка через hostapd_cli
 for iface in $(iw dev | awk '$1=="Interface"{print $2}'); do
-    uci set wireless.@wifi-iface[0].ap_script="$WIFI_MONITOR_SCRIPT"
+    hostapd_cli -i $iface -a $WIFI_MONITOR_SCRIPT &
 done
-uci commit wireless
-wifi reload
 
-# Telegram уведомление об установке
-curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=$CHAT_ID&text=✅ FRPC установлен на $HOSTNAME ($WAN_IP)%0A🔹 Luci: $luci_name → :$luci_port%0A🔹 SSH: $ssh_name → :$ssh_port"
+# Уведомление об установке
+MSG="✅ Установка завершена на $HOSTNAME ($WAN_IP)
 
-echo -e "${GREEN}Установка завершена.${NC}"
+🔹 Luci: $luci_name → :$luci_port
+🔹 SSH: $ssh_name → :$ssh_port"
+
+wget -qO- --post-data="chat_id=$CHAT_ID&text=$MSG" "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+
+echo -e "${GREEN}Готово!${NC}"
