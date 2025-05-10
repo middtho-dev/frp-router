@@ -36,7 +36,7 @@ remove_all() {
     sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
 
-    send_telegram "🗑️ *FRPC и все скрипты удалены c* \`$HOSTNAME\`"
+    send_telegram "🗑️ FRPC и все скрипты удалены c *$HOSTNAME*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
@@ -151,8 +151,7 @@ get_status() {
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-    echo "
-📊 *Состояние системы:*
+    echo "📊 *Состояние системы:*
     
 🕒*$uptime_info*
 📡 *Внешний IP*: $ext_ip
@@ -163,16 +162,16 @@ get_status() {
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
     send_telegram "⚠️ *$DATE_NOW* 
-FRPC на *\`$HOSTNAME\`* не работает. 
+FRPC на *$HOSTNAME* не работает. 
 Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
-        send_telegram "✅ FRPC на *\`$HOSTNAME\`* успешно перезапущен.
+        send_telegram "✅ FRPC на *$HOSTNAME* успешно перезапущен.
     
     $(get_status)"
     else
-        send_telegram "❌ Не удалось перезапустить FRPC на *\`$HOSTNAME\`*!"
+        send_telegram "❌ Не удалось перезапустить FRPC на *$HOSTNAME*!"
     fi
 fi
 EOF
@@ -201,8 +200,7 @@ get_info() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
-    echo "
-📊 *Состояние системы на \`$HOSTNAME\`*
+    echo "📊 Состояние системы на *$HOSTNAME*
 
 🕒*$uptime_info*
 📡 *Внешний IP*: $ext_ip
@@ -218,8 +216,8 @@ chmod +x "$INFO_SCRIPT"
 
 # Cron
 echo -e "${GREEN}Настройка cron...${NC}"
-grep -q "$WATCHDOG_SCRIPT" "$CRON_FILE" || echo "*/1 * * * * $WATCHDOG_SCRIPT" >> "$CRON_FILE"
-grep -q "$INFO_SCRIPT" "$CRON_FILE" || echo "0 * * * * $INFO_SCRIPT" >> "$CRON_FILE"
+( crontab -l 2>/dev/null | grep -q "$WATCHDOG_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $WATCHDOG_SCRIPT" ) | crontab -
+( crontab -l 2>/dev/null | grep -q "$INFO_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $INFO_SCRIPT" ) | crontab -
 /etc/init.d/cron restart
 
 # Telegram сообщение об установке
@@ -229,7 +227,7 @@ EXT_IP=$(wget -qO- https://api.ipify.org)
 DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
-MESSAGE="✅ *FRPC установлен на \`$HOSTNAME\`*
+MESSAGE="✅ FRPC установлен на *$HOSTNAME*
 🔹 *Luci:* http://router.kv9.ru:$luci_port
 🔹 *SSH:* http://router.kv9.ru:$ssh_port
 
