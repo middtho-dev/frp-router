@@ -2,10 +2,19 @@
 
 echo "[*] Установка Wi-Fi Telegram Monitor..."
 
-# Создаём папку
+# Проверка и установка coreutils-comm (если отсутствует)
+if ! command -v comm >/dev/null 2>&1; then
+    echo "[!] Утилита 'comm' не найдена. Устанавливаем..."
+    opkg update && opkg install coreutils-comm || {
+        echo "[X] Не удалось установить 'coreutils-comm'. Установите вручную: opkg install coreutils-comm"
+        exit 1
+    }
+fi
+
+# Создаём директорию
 mkdir -p /etc/wifi-monitor
 
-# Основной мониторинг-скрипт
+# Основной скрипт
 cat << 'EOF' > /etc/wifi-monitor/wifi-monitor.sh
 #!/bin/sh
 
@@ -40,7 +49,6 @@ while true; do
     CURRENT_LIST="/tmp/wifi_monitor_current"
     get_current_clients | sort > "$CURRENT_LIST"
 
-    # Новые подключения
     for mac in $(comm -13 "$CLIENT_LIST" "$CURRENT_LIST"); do
         info=$(get_ip_hostname "$mac")
         ip=$(echo "$info" | cut -d'|' -f1)
@@ -55,7 +63,6 @@ while true; do
 🔗 MAC: \`$mac\`"
     done
 
-    # Отключения
     for mac in $(comm -23 "$CLIENT_LIST" "$CURRENT_LIST"); do
         info=$(get_ip_hostname "$mac")
         ip=$(echo "$info" | cut -d'|' -f1)
@@ -77,7 +84,7 @@ EOF
 
 chmod +x /etc/wifi-monitor/wifi-monitor.sh
 
-# Init.d-скрипт
+# Init.d
 cat << 'EOF' > /etc/init.d/wifi-monitor
 #!/bin/sh /etc/rc.common
 
@@ -99,7 +106,11 @@ chmod +x /etc/init.d/wifi-monitor
 /etc/init.d/wifi-monitor enable
 /etc/init.d/wifi-monitor start
 
-# Cron-задача как резервный запуск
+# Подготовка crontab
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+
+# Cron-задача для надёжного автозапуска
 grep -q "wifi-monitor-check" /etc/crontabs/root || {
     echo "*/2 * * * * grep -q wifi-monitor.sh /proc/*/cmdline || /etc/init.d/wifi-monitor start # wifi-monitor-check" >> /etc/crontabs/root
     /etc/init.d/cron restart
