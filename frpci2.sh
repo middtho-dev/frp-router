@@ -159,8 +159,7 @@ get_status() {
 }
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
-    send_telegram "⚠️ \`$HOSTNAME\`
-FRPC не работает. Перезапуск..."
+    send_telegram "⚠️ \`$HOSTNAME\` FRPC не работает. Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
