@@ -36,7 +36,7 @@ remove_all() {
     sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
 
-    send_telegram "🗑️ *FRPC и все скрипты удалены*"
+    send_telegram "🗑️ *FRPC и все скрипты удалены c \`$HOSTNAME\`*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
@@ -156,13 +156,11 @@ get_status() {
 🌐 IP: $ext_ip
 💽 RAM: ${ram_free}M
 📦 Диск: $disk_free
-🔥 CPU: $cpu_load"
 }
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
     send_telegram "⚠️ \`$HOSTNAME\`
-    *$DATE_NOW* FRPC не работает. 
-    Перезапуск..."
+FRPC не работает. Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
@@ -203,7 +201,6 @@ get_info() {
 🌐 Внешний IP: $ext_ip
 💽 RAM: ${ram_free}M
 📦 Диск: $disk_free
-🔥 CPU: $cpu_load"
 }
 
 send_telegram "$(get_info)"
@@ -225,8 +222,8 @@ DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
-🔹 *Luci*: \`$luci_name\` → :$luci_port
-🔹 *SSH*:  \`$ssh_name\` → :$ssh_port
+🔹 *Luci*: \`$luci_name\` → router.kv9.ru:$luci_port
+🔹 *SSH*:  \`$ssh_name\` → router.kv9.ru:$ssh_port
 
 📡 *Внешний IP*: $EXT_IP
 📦 *Диск*: $DISK
