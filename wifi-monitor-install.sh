@@ -2,10 +2,10 @@
 
 echo "[*] Установка Wi-Fi Telegram Monitor..."
 
-# Папка скрипта
+# Создаём папку
 mkdir -p /etc/wifi-monitor
 
-# Сохраняем основной скрипт
+# Основной мониторинг-скрипт
 cat << 'EOF' > /etc/wifi-monitor/wifi-monitor.sh
 #!/bin/sh
 
@@ -17,29 +17,25 @@ send_msg() {
     curl -s -m 5 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
         -d "chat_id=${CHAT_ID}" \
         --data-urlencode "text=${TEXT}" \
+        -d "parse_mode=Markdown" \
         -d "disable_notification=false" >/dev/null
 }
 
-# Получаем текущее подключение
 get_current_clients() {
     iwinfo | grep 'ESSID' >/dev/null 2>&1 || exit 1
-
     for iface in $(iw dev | grep Interface | awk '{print $2}'); do
         iw dev "$iface" station dump 2>/dev/null | grep '^Station' | awk '{print $2}'
     done
 }
 
-# Получение IP и имени по MAC
 get_ip_hostname() {
     MAC="$1"
     grep -i "$MAC" /tmp/dhcp.leases | awk '{printf "%s|%s", $3, $2}'
 }
 
-# Файл с предыдущими MAC
 CLIENT_LIST="/tmp/wifi_monitor_clients"
 touch "$CLIENT_LIST"
 
-# Основной цикл
 while true; do
     CURRENT_LIST="/tmp/wifi_monitor_current"
     get_current_clients | sort > "$CURRENT_LIST"
@@ -81,10 +77,9 @@ EOF
 
 chmod +x /etc/wifi-monitor/wifi-monitor.sh
 
-# Сохраняем init.d скрипт
+# Init.d-скрипт
 cat << 'EOF' > /etc/init.d/wifi-monitor
 #!/bin/sh /etc/rc.common
-# Init script for Wi-Fi Telegram Monitor
 
 START=95
 STOP=10
@@ -104,4 +99,10 @@ chmod +x /etc/init.d/wifi-monitor
 /etc/init.d/wifi-monitor enable
 /etc/init.d/wifi-monitor start
 
-echo "[✓] Установка завершена. Мониторинг Wi-Fi клиентов запущен."
+# Cron-задача как резервный запуск
+grep -q "wifi-monitor-check" /etc/crontabs/root || {
+    echo "*/2 * * * * grep -q wifi-monitor.sh /proc/*/cmdline || /etc/init.d/wifi-monitor start # wifi-monitor-check" >> /etc/crontabs/root
+    /etc/init.d/cron restart
+}
+
+echo "[✓] Установка завершена. Мониторинг Wi-Fi клиентов активен."
