@@ -170,7 +170,7 @@ FRPC на *$HOSTNAME* не работает.
     if pgrep -f "$FRPC_BIN" > /dev/null; then
         send_telegram "✅ FRPC на *$HOSTNAME* успешно перезапущен.
     
-    $(get_status)"
+$(get_status)"
     else
         send_telegram "❌ Не удалось перезапустить FRPC на *$HOSTNAME*!"
     fi
