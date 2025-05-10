@@ -36,7 +36,7 @@ remove_all() {
     sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
 
-    send_telegram "🗑️ *FRPC и все скрипты удалены c \$HOSTNAME\*"
+    send_telegram "🗑️ *FRPC и все скрипты удалены c $HOSTNAME*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
@@ -164,10 +164,10 @@ FRPC не работает. Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
-        send_telegram "✅ FRPC успешно перезапущен.
+        send_telegram "✅ \`$HOSTNAME\` FRPC успешно перезапущен.
         $(get_status)"
     else
-        send_telegram "❌ Не удалось перезапустить FRPC!"
+        send_telegram "❌ \`$HOSTNAME\` Не удалось перезапустить FRPC!"
     fi
 fi
 EOF
@@ -228,7 +228,7 @@ MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
 📡 *Внешний IP*: $EXT_IP
 📦 *Диск*: $DISK
 💽 *RAM*: ${RAM}M
-🕒 $UPTIME"
+🕒 $uptime_info"
 
 send_telegram "$MESSAGE"
 
