@@ -24,6 +24,10 @@ CHAT_ID='382094545'
 
 send_msg() {
     TEXT="$1"
+    DEVICE_NAME=$(hostname)  # Получаем имя устройства
+    IP_ADDR=$(hostname -I | awk '{print $1}')  # Получаем IP-адрес устройства
+    TEXT="$TEXT\n\n🖥️ Устройство: *$DEVICE_NAME*\n🌍 IP-адрес устройства: *$IP_ADDR*"
+    
     curl -s -m 5 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
         -d "chat_id=${CHAT_ID}" \
         --data-urlencode "text=${TEXT}" \
