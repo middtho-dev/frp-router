@@ -58,7 +58,7 @@ while true; do
         [ -z "$ip" ] && ip="Неизвестен"
         [ -z "$name" ] && name="Неизвестно"
 
-        send_msg "✅ *Новое Wi-Fi подключение*
+        send_msg "✅ *Устройство Wi-Fi подключено*
 📱 Имя: *$name*
 🌐 IP: \`$ip\`
 🔗 MAC: \`$mac\`"
@@ -72,7 +72,7 @@ while true; do
         [ -z "$ip" ] && ip="Неизвестен"
         [ -z "$name" ] && name="Неизвестно"
 
-        send_msg "❌ *Wi-Fi отключение*
+        send_msg "❌ *Устройство Wi-Fi отключено*
 💻 Имя: *$name*
 🌐 IP: \`$ip\`
 🔗 MAC: \`$mac\`"
