@@ -147,24 +147,28 @@ send_telegram() {
 
 get_status() {
     uptime_info=$(uptime | cut -d',' -f1)
-    cpu_load=$(top -bn1 | grep "load average" | awk '{print $12 $13 $14}')
+    cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
     echo "*Состояние системы:*
-🕒 $uptime_info
-🌐 IP: $ext_ip
-💽 RAM: ${ram_free}Kb
-📦 Диск: $disk_free"
+🕒*$uptime_info*
+📡 *Внешний IP*: $ext_ip
+💽 *RAM*: ${ram_free}Kb
+📦 *Диск*: $disk_free
+🔥 *CPU*: $cpu_load"
 }
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
     send_telegram "⚠️ *$DATE_NOW* 
-    \`$HOSTNAME\` FRPC не работает. Перезапуск..."
+FRPC на \`$HOSTNAME\` не работает. 
+Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
-        send_telegram "✅ FRPC успешно перезапущен.\n$(get_status)"
+        send_telegram "✅ FRPC успешно перезапущен.
+    
+    $(get_status)"
     else
         send_telegram "❌ Не удалось перезапустить FRPC!"
     fi
@@ -190,16 +194,17 @@ send_telegram() {
 get_info() {
     HOSTNAME=$(uname -n)
     uptime_info=$(uptime | cut -d',' -f1)
-    cpu_load=$(top -bn1 | grep "load average" | awk '{print $12 $13 $14}')
+    cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
     echo "*FRPC статус на* \`$HOSTNAME\`
-🕒 $uptime_info
-🌐 Внешний IP: $ext_ip
-💽 RAM: ${ram_free}Kb
-📦 Диск: $disk_free"
+🕒*$uptime_info*
+📡 *Внешний IP*: $ext_ip
+💽 *RAM*: ${ram_free}Kb
+📦 *Диск*: $disk_free
+🔥 *CPU*: $cpu_load"
 }
 
 send_telegram "$(get_info)"
