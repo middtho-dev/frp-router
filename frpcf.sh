@@ -221,13 +221,10 @@ DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
-🔹 *Luci*: \`$luci_name\` → :$luci_port
-🔹 *SSH*:  \`$ssh_name\` → :$ssh_port
+🔹 *Luci port*: $luci_port
+🔹 *SSH port*: $ssh_port
 
-📡 *Внешний IP*: $EXT_IP
-📦 *Диск*: $DISK
-💽 *RAM*: ${RAM}M
-🕒 $UPTIME"
+📡 *Внешний IP*: $EXT_IP"
 
 send_telegram "$MESSAGE"
 
