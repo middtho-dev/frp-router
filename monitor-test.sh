@@ -22,7 +22,7 @@ cat << 'EOF' > /etc/wifi-monitor/wifi-monitor.sh
 TOKEN='6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY'
 CHAT_ID='382094545'
 
-DEVICE_NAME=$(hostname)  # Получаем имя устройства
+DEVICE_NAME=$(uci get system.@system[0].hostname)  # Получаем имя устройства через uci
 
 send_msg() {
     TEXT="$1"
