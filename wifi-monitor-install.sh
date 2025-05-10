@@ -1,170 +1,107 @@
 #!/bin/sh
 
-# WiFi Monitoring Install Script for OpenWRT
-# GitHub: https://github.com/middtho-dev/frp-router/blob/main/wifi-monitor-install.sh
+echo "[*] Установка Wi-Fi Telegram Monitor..."
 
-# Telegram Bot Configuration
-BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
-CHAT_ID="382094545"
-ROUTER_NAME=$(uci get system.@system[0].hostname 2>/dev/null || echo "OpenWRT")
+# Папка скрипта
+mkdir -p /etc/wifi-monitor
 
-# Install required packages
-opkg update
-opkg install hostapd-utils curl
-
-# Create directories and files
-mkdir -p /var/log/wifi-monitor
-touch /var/log/wifi-monitor/debug.log
-chmod 644 /var/log/wifi-monitor/debug.log
-
-# Create hostapd event handler
-cat << 'EOF' > /usr/bin/hostapd-event.sh
+# Сохраняем основной скрипт
+cat << 'EOF' > /etc/wifi-monitor/wifi-monitor.sh
 #!/bin/sh
 
-# Hostapd Event Handler
-BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
-CHAT_ID="382094545"
-ROUTER_NAME=$(uci get system.@system[0].hostname 2>/dev/null || echo "OpenWRT")
-LOG_FILE="/var/log/wifi-monitor/debug.log"
+TOKEN='6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY'
+CHAT_ID='382094545'
 
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> $LOG_FILE
+send_msg() {
+    TEXT="$1"
+    curl -s -m 5 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+        -d "chat_id=${CHAT_ID}" \
+        --data-urlencode "text=${TEXT}" \
+        -d "disable_notification=false" >/dev/null
 }
 
-send_telegram() {
-    local message="$1"
-    log "Sending Telegram: $message"
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-        -d chat_id="${CHAT_ID}" \
-        -d text="${message}" \
-        -d disable_notification="false" >> $LOG_FILE 2>&1
-}
+# Получаем текущее подключение
+get_current_clients() {
+    iwinfo | grep 'ESSID' >/dev/null 2>&1 || exit 1
 
-get_client_info() {
-    local mac="$1"
-    
-    # Get IP from ARP table
-    local ip=$(ip neigh | grep -i "$mac" | awk '{print $1}')
-    [ -z "$ip" ] && ip="N/A"
-    
-    # Get hostname from DHCP leases
-    local host=$(grep -i "$mac" /tmp/dhcp.leases | awk '{print $4}')
-    [ -z "$host" ] && host="Unknown"
-    
-    echo "$ip,$host"
-}
-
-case "$1" in
-    AP-STA-CONNECTED)
-        MAC="$2"
-        log "CONNECTED EVENT: MAC=$MAC"
-        IFS=, read -r ip host <<< "$(get_client_info "$MAC")"
-        send_telegram "🟢 Device connected to ${ROUTER_NAME}:
-- Device: ${host}
-- MAC: ${MAC}
-- IP: ${ip}"
-        ;;
-    AP-STA-DISCONNECTED)
-        MAC="$2"
-        log "DISCONNECTED EVENT: MAC=$MAC"
-        IFS=, read -r ip host <<< "$(get_client_info "$MAC")"
-        send_telegram "🔴 Device disconnected from ${ROUTER_NAME}:
-- Device: ${host}
-- MAC: ${MAC}
-- IP: ${ip}"
-        ;;
-    MONITOR-STARTED)
-        send_telegram "🟢 WiFi Monitoring started on ${ROUTER_NAME}"
-        ;;
-    *)
-        log "UNKNOWN EVENT: $@"
-        ;;
-esac
-EOF
-
-# Create monitoring script
-cat << 'EOF' > /usr/bin/wifi-monitor.sh
-#!/bin/sh
-
-# WiFi Monitoring Script
-LOG_FILE="/var/log/wifi-monitor/debug.log"
-
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> $LOG_FILE
-}
-
-find_wifi_interfaces() {
-    # Method 1: Check running hostapd processes
-    interfaces=$(ps | grep hostapd | grep -oE '\-i [^ ]+' | awk '{print $2}' | sort -u)
-    
-    # Method 2: Check hostapd sockets
-    [ -z "$interfaces" ] && interfaces=$(ls /var/run/hostapd/ 2>/dev/null | grep -v '^global$')
-    
-    # Method 3: Check network interfaces
-    [ -z "$interfaces" ] && interfaces=$(iw dev | awk '/Interface/ {print $2}')
-    
-    echo "$interfaces"
-}
-
-log "Starting WiFi monitor script"
-
-# Initial startup notification
-/usr/bin/hostapd-event.sh "MONITOR-STARTED"
-
-# Main monitoring loop
-while true; do
-    INTERFACES=$(find_wifi_interfaces)
-    log "Found interfaces: $INTERFACES"
-    
-    if [ -z "$INTERFACES" ]; then
-        log "No active WiFi interfaces found"
-        sleep 10
-        continue
-    fi
-
-    for IFACE in $INTERFACES; do
-        if ! pgrep -f "hostapd_cli.*${IFACE}" >/dev/null; then
-            log "Starting monitor for $IFACE"
-            hostapd_cli -i "$IFACE" -a /usr/bin/hostapd-event.sh >> $LOG_FILE 2>&1 &
-        fi
+    for iface in $(iw dev | grep Interface | awk '{print $2}'); do
+        iw dev "$iface" station dump 2>/dev/null | grep '^Station' | awk '{print $2}'
     done
-    
-    sleep 30
+}
+
+# Получение IP и имени по MAC
+get_ip_hostname() {
+    MAC="$1"
+    grep -i "$MAC" /tmp/dhcp.leases | awk '{printf "%s|%s", $3, $2}'
+}
+
+# Файл с предыдущими MAC
+CLIENT_LIST="/tmp/wifi_monitor_clients"
+touch "$CLIENT_LIST"
+
+# Основной цикл
+while true; do
+    CURRENT_LIST="/tmp/wifi_monitor_current"
+    get_current_clients | sort > "$CURRENT_LIST"
+
+    # Новые подключения
+    for mac in $(comm -13 "$CLIENT_LIST" "$CURRENT_LIST"); do
+        info=$(get_ip_hostname "$mac")
+        ip=$(echo "$info" | cut -d'|' -f1)
+        name=$(echo "$info" | cut -d'|' -f2)
+
+        [ -z "$ip" ] && ip="Неизвестен"
+        [ -z "$name" ] && name="Неизвестно"
+
+        send_msg "✅ *Новое Wi-Fi подключение*
+📱 Имя: *$name*
+🌐 IP: \`$ip\`
+🔗 MAC: \`$mac\`"
+    done
+
+    # Отключения
+    for mac in $(comm -23 "$CLIENT_LIST" "$CURRENT_LIST"); do
+        info=$(get_ip_hostname "$mac")
+        ip=$(echo "$info" | cut -d'|' -f1)
+        name=$(echo "$info" | cut -d'|' -f2)
+
+        [ -z "$ip" ] && ip="Неизвестен"
+        [ -z "$name" ] && name="Неизвестно"
+
+        send_msg "❌ *Wi-Fi отключение*
+💻 Имя: *$name*
+🌐 IP: \`$ip\`
+🔗 MAC: \`$mac\`"
+    done
+
+    mv "$CURRENT_LIST" "$CLIENT_LIST"
+    sleep 10
 done
 EOF
 
-# Set permissions
-chmod +x /usr/bin/wifi-monitor.sh
-chmod +x /usr/bin/hostapd-event.sh
+chmod +x /etc/wifi-monitor/wifi-monitor.sh
 
-# Create init script
+# Сохраняем init.d скрипт
 cat << 'EOF' > /etc/init.d/wifi-monitor
 #!/bin/sh /etc/rc.common
+# Init script for Wi-Fi Telegram Monitor
 
-START=99
-STOP=01
+START=95
+STOP=10
 
 start() {
-    echo "Starting WiFi monitoring..."
-    /usr/bin/wifi-monitor.sh >> /var/log/wifi-monitor/service.log 2>&1 &
+    echo "[+] Запуск wifi-monitor"
+    /etc/wifi-monitor/wifi-monitor.sh &
 }
 
 stop() {
-    echo "Stopping WiFi monitoring..."
+    echo "[-] Остановка wifi-monitor"
     killall wifi-monitor.sh 2>/dev/null
-    killall hostapd-event.sh 2>/dev/null
-    killall hostapd_cli 2>/dev/null
-}
-
-restart() {
-    stop
-    start
 }
 EOF
 
-# Enable and start service
 chmod +x /etc/init.d/wifi-monitor
 /etc/init.d/wifi-monitor enable
-/etc/init.d/wifi-monitor restart
+/etc/init.d/wifi-monitor start
 
-echo "Installation complete! Debug logs: tail -f /var/log/wifi-monitor/debug.log"
+echo "[✓] Установка завершена. Мониторинг Wi-Fi клиентов запущен."
