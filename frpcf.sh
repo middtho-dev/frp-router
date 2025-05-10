@@ -151,17 +151,18 @@ get_status() {
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-    echo "📊 *Состояние системы:*
-    
-🕒*$uptime_info*
+echo "📊 *Состояние системы:*
+
 📡 *Внешний IP*: $ext_ip
+🕒*$uptime_info*
 💽 *RAM*: ${ram_free}Kb
 📦 *Диск*: $disk_free
 🔥 *CPU*: $cpu_load"
 }
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
-    send_telegram "⚠️ *$DATE_NOW* 
+    send_telegram "⚠️ *$DATE_NOW*
+
 FRPC на *$HOSTNAME* не работает. 
 Перезапуск..."
     /etc/init.d/frpc restart
@@ -200,10 +201,10 @@ get_info() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
-    echo "📊 Состояние системы на *$HOSTNAME*
+echo "📊 Состояние системы на *$HOSTNAME*
 
-🕒*$uptime_info*
 📡 *Внешний IP*: $ext_ip
+🕒*$uptime_info*
 💽 *RAM*: ${ram_free}Kb
 📦 *Диск*: $disk_free
 🔥 *CPU*: $cpu_load"
@@ -228,9 +229,9 @@ DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ FRPC установлен на *$HOSTNAME*
+
 🔹 *Luci:* http://router.kv9.ru:$luci_port
 🔹 *SSH:* http://router.kv9.ru:$ssh_port
-
 📡 *Внешний IP*: $EXT_IP"
 
 send_telegram "$MESSAGE"
