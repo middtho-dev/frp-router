@@ -228,7 +228,7 @@ MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
 📡 *Внешний IP*: $EXT_IP
 📦 *Диск*: $DISK
 💽 *RAM*: ${RAM}M
-🕒 $uptime_info"
+🕒 $UPTIME"
 
 send_telegram "$MESSAGE"
 
