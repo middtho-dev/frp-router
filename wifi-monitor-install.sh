@@ -4,9 +4,10 @@ echo "[*] Установка Wi-Fi Telegram Monitor..."
 
 # Проверка и установка coreutils-comm (если отсутствует)
 if ! command -v comm >/dev/null 2>&1; then
-    echo "[!] Утилита 'comm' не найдена. Устанавливаем..."
-    opkg update && opkg install coreutils-comm || {
-        echo "[X] Не удалось установить 'coreutils-comm'. Установите вручную: opkg install coreutils-comm"
+    echo "[*] Обновление opkg и установка зависимостей..."
+    opkg update
+    opkg install coreutils-comm || {
+        echo "[X] Не удалось установить coreutils-comm. Установите вручную."
         exit 1
     }
 fi
@@ -78,7 +79,7 @@ while true; do
     done
 
     mv "$CURRENT_LIST" "$CLIENT_LIST"
-    sleep 10
+    sleep 2
 done
 EOF
 
