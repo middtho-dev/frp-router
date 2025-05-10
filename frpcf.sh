@@ -151,7 +151,9 @@ get_status() {
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-    echo "*Состояние системы:*
+    echo "
+📊 *Состояние системы:*
+    
 🕒*$uptime_info*
 📡 *Внешний IP*: $ext_ip
 💽 *RAM*: ${ram_free}Kb
@@ -161,16 +163,16 @@ get_status() {
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
     send_telegram "⚠️ *$DATE_NOW* 
-FRPC на \`$HOSTNAME\` не работает. 
+FRPC на *\`$HOSTNAME\`* не работает. 
 Перезапуск..."
     /etc/init.d/frpc restart
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
-        send_telegram "✅ FRPC успешно перезапущен.
+        send_telegram "✅ FRPC на *\`$HOSTNAME\`* успешно перезапущен.
     
     $(get_status)"
     else
-        send_telegram "❌ Не удалось перезапустить FRPC!"
+        send_telegram "❌ Не удалось перезапустить FRPC на *\`$HOSTNAME\`*!"
     fi
 fi
 EOF
@@ -199,7 +201,9 @@ get_info() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
-    echo "*FRPC статус на* \`$HOSTNAME\`
+    echo "
+📊 *Состояние системы на \`$HOSTNAME\`*
+
 🕒*$uptime_info*
 📡 *Внешний IP*: $ext_ip
 💽 *RAM*: ${ram_free}Kb
@@ -226,8 +230,8 @@ DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
-🔹 *Luci:*http://router.kv9.ru:$luci_port
-🔹 *SSH:*http://router.kv9.ru:$ssh_port
+🔹 *Luci:* http://router.kv9.ru:$luci_port
+🔹 *SSH:* http://router.kv9.ru:$ssh_port
 
 📡 *Внешний IP*: $EXT_IP"
 
