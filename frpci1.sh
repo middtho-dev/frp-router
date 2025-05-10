@@ -36,7 +36,7 @@ remove_all() {
     sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
 
-    send_telegram "🗑️ *FRPC и все скрипты удалены c \`$HOSTNAME\`*"
+    send_telegram "🗑️ *FRPC и все скрипты удалены c \$HOSTNAME\*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
