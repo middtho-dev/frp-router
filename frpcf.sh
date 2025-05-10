@@ -221,8 +221,8 @@ DISK=$(df -h / | awk 'NR==2 {print $4}')
 RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ *FRPC установлен на* \`$HOSTNAME\`
-🔹 *Luci port*: $luci_port
-🔹 *SSH port*: $ssh_port
+🔹 *Luci:*http://router.kv9.ru:$luci_port
+🔹 *SSH:*http://router.kv9.ru:$ssh_port
 
 📡 *Внешний IP*: $EXT_IP"
 
