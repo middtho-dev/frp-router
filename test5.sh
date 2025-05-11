@@ -6,8 +6,7 @@ NC='\033[0m'
 
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
-WATCHDOG_SCRIPT="/root/frpc_watchdog.sh"
-INFO_SCRIPT="/root/frpc_sysinfo.sh"
+UTIL_SCRIPT="$FRP_DIR/frpc_util.sh"
 CRON_FILE="/etc/crontabs/root"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
@@ -37,9 +36,7 @@ remove_all() {
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
     rm -rf "$FRP_DIR"
-    rm -f "$WATCHDOG_SCRIPT" "$INFO_SCRIPT"
-    sed -i "\|$WATCHDOG_SCRIPT|d" "$CRON_FILE"
-    sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
+    sed -i "\|$UTIL_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
     send_telegram "🗑️ FRPC и все скрипты удалены c *$(uname -n)*"
     echo -e "${GREEN}Удаление завершено.${NC}"
@@ -58,7 +55,6 @@ if [ -z "$DEVICE_NAME" ] || [ -z "$DEVICE_NUMBER" ]; then
         exit 1
     fi
 
-    # Запрос параметров только после выбора
     read -p "Название устройства (например: Home): " DEVICE_NAME
     read -p "Номер устройства (например: 21): " DEVICE_NUMBER
 fi
@@ -137,8 +133,10 @@ uci set system.@system[0].zonename='Europe/Moscow'
 uci commit system
 /etc/init.d/system reload
 
-cat <<'EOF' > "$WATCHDOG_SCRIPT"
+# Объединённый скрипт
+cat <<'EOF' > "$UTIL_SCRIPT"
 #!/bin/sh
+
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 FRPC_BIN="/root/frp/frpc"
@@ -152,52 +150,6 @@ send_telegram() {
 }
 
 get_status() {
-    uptime_info=$(uptime | cut -d',' -f1)
-    cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
-    ram_free=$(free -m | awk '/Mem:/ {print $4}')
-    disk_free=$(df -h / | awk 'NR==2 {print $4}')
-    ext_ip=$(wget -qO- https://api.ipify.org)
-    echo "📊 *Состояние системы:*
-
-📡 *Внешний IP*: $ext_ip
-🕒*$uptime_info*
-💽 *RAM*: ${ram_free}Kb
-📦 *Диск*: $disk_free
-🔥 *CPU*: $cpu_load"
-}
-
-if ! pgrep -f "$FRPC_BIN" > /dev/null; then
-    send_telegram "⚠️ *$DATE_NOW*
-
-FRPC на *$(uname -n)* не работает. 
-Перезапуск..."
-    /etc/init.d/frpc restart
-    sleep 5
-    if pgrep -f "$FRPC_BIN" > /dev/null; then
-        send_telegram "✅ FRPC на *$(uname -n)* успешно перезапущен.
-
-$(get_status)"
-    else
-        send_telegram "❌ Не удалось перезапустить FRPC на *$(uname -n)*!"
-    fi
-fi
-EOF
-
-chmod +x "$WATCHDOG_SCRIPT"
-
-cat <<'EOF' > "$INFO_SCRIPT"
-#!/bin/sh
-BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
-CHAT_ID="382094545"
-
-send_telegram() {
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        -d chat_id="$CHAT_ID" \
-        -d parse_mode=Markdown \
-        --data-urlencode "text=$1"
-}
-
-get_info() {
     HOSTNAME=$(uname -n)
     uptime_info=$(uptime | cut -d',' -f1)
     cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
@@ -214,14 +166,35 @@ get_info() {
 🔥 *CPU*: $cpu_load"
 }
 
-send_telegram "$(get_info)"
+if [ "$1" = "check" ]; then
+    if ! pgrep -f "$FRPC_BIN" > /dev/null; then
+        send_telegram "⚠️ *$DATE_NOW*
+
+FRPC на *$(uname -n)* не работает. 
+Перезапуск..."
+        /etc/init.d/frpc restart
+        sleep 5
+        if pgrep -f "$FRPC_BIN" > /dev/null; then
+            send_telegram "✅ FRPC на *$(uname -n)* успешно перезапущен.
+
+$(get_status)"
+        else
+            send_telegram "❌ Не удалось перезапустить FRPC на *$(uname -n)*!"
+        fi
+    fi
+elif [ "$1" = "info" ]; then
+    send_telegram "$(get_status)"
+else
+    echo "Использование: $0 [check|info]"
+    exit 1
+fi
 EOF
 
-chmod +x "$INFO_SCRIPT"
+chmod +x "$UTIL_SCRIPT"
 
 echo -e "${GREEN}Настройка cron...${NC}"
-( crontab -l 2>/dev/null | grep -q "$WATCHDOG_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $WATCHDOG_SCRIPT" ) | crontab -
-( crontab -l 2>/dev/null | grep -q "$INFO_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $INFO_SCRIPT" ) | crontab -
+( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT check" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $UTIL_SCRIPT check" ) | crontab -
+( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT info" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $UTIL_SCRIPT info" ) | crontab -
 /etc/init.d/cron restart
 
 EXT_IP=$(wget -qO- https://api.ipify.org)
