@@ -36,7 +36,8 @@ remove_all() {
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
     rm -rf "$FRP_DIR"
-    sed -i "\|$UTIL_SCRIPT|d" "$CRON_FILE"
+    sed -i "\|$UTIL_SCRIPT check|d" "$CRON_FILE"
+    sed -i "\|$UTIL_SCRIPT info|d" "$CRON_FILE"
     /etc/init.d/cron restart
     send_telegram "🗑️ FRPC и все скрипты удалены c *$(uname -n)*"
     echo -e "${GREEN}Удаление завершено.${NC}"
@@ -133,13 +134,11 @@ uci set system.@system[0].zonename='Europe/Moscow'
 uci commit system
 /etc/init.d/system reload
 
-# Объединённый скрипт
 cat <<'EOF' > "$UTIL_SCRIPT"
 #!/bin/sh
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-FRPC_BIN="/root/frp/frpc"
 DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
 
 send_telegram() {
@@ -150,14 +149,12 @@ send_telegram() {
 }
 
 get_status() {
-    HOSTNAME=$(uname -n)
     uptime_info=$(uptime | cut -d',' -f1)
     cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
     ram_free=$(free -m | awk '/Mem:/ {print $4}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-
-    echo "📊 Состояние системы на *$HOSTNAME*
+    echo "📊 *Состояние системы:*
 
 📡 *Внешний IP*: $ext_ip
 🕒*$uptime_info*
@@ -167,14 +164,14 @@ get_status() {
 }
 
 if [ "$1" = "check" ]; then
-    if ! pgrep -f "$FRPC_BIN" > /dev/null; then
+    if ! pidof frpc > /dev/null; then
         send_telegram "⚠️ *$DATE_NOW*
 
 FRPC на *$(uname -n)* не работает. 
 Перезапуск..."
         /etc/init.d/frpc restart
         sleep 5
-        if pgrep -f "$FRPC_BIN" > /dev/null; then
+        if pidof frpc > /dev/null; then
             send_telegram "✅ FRPC на *$(uname -n)* успешно перезапущен.
 
 $(get_status)"
@@ -183,10 +180,10 @@ $(get_status)"
         fi
     fi
 elif [ "$1" = "info" ]; then
-    send_telegram "$(get_status)"
-else
-    echo "Использование: $0 [check|info]"
-    exit 1
+    HOSTNAME=$(uname -n)
+    send_telegram "📊 Состояние системы на *$HOSTNAME*
+
+$(get_status)"
 fi
 EOF
 
