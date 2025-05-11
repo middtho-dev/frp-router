@@ -132,8 +132,10 @@ chmod +x "$INIT_SCRIPT"
 
 echo -e "${GREEN}Настройка имени и часового пояса...${NC}"
 uci set system.@system[0].hostname="$DEVICE_NAME"
-uci set system.@system[0].timezone='Europe/Moscow'
+uci set system.@system[0].timezone='MSK-3'
+uci set system.@system[0].zonename='Europe/Moscow'
 uci commit system
+/etc/init.d/system reload
 
 cat <<'EOF' > "$WATCHDOG_SCRIPT"
 #!/bin/sh
