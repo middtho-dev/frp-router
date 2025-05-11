@@ -188,11 +188,11 @@ FRPC на *$(uname -n)* не работает.
         /etc/init.d/frpc restart
         sleep 5
         if pidof frpc > /dev/null; then
-            send_telegram "✅ FRPC на *$(uname -n)* успешно перезапущен.
+            send_telegram "✅ *FRPC* на *$(uname -n)* успешно запущен.
 
 $(get_status)"
         else
-            send_telegram "❌ Не удалось перезапустить FRPC на *$(uname -n)*!"
+            send_telegram "❌ Не удалось запустить FRPC на *$(uname -n)*!"
         fi
     fi
 elif [ "$1" = "info" ]; then
