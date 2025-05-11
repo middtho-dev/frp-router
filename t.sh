@@ -149,17 +149,33 @@ send_telegram() {
 }
 
 get_status() {
-    uptime_info=$(uptime | cut -d',' -f1)
-    cpu_load=$(top -bn1 | grep "load average" | awk '{print $6}')
-    ram_free=$(free -m | awk '/Mem:/ {print $4}')
+    uptime_info=$(uptime | awk -F'up ' '{print $2}' | cut -d',' -f1)
+
+    # Получаем load average и количество ядер
+    load=$(uptime | awk -F'load average: ' '{print $2}' | cut -d, -f1)
+    cores=$(grep -c ^processor /proc/cpuinfo)
+    if [ "$cores" -gt 0 ]; then
+        cpu_load=$(awk -v l="$load" -v c="$cores" 'BEGIN { printf "%.0f%%", (l/c)*100 }')
+    else
+        cpu_load="n/a"
+    fi
+
+    # Получаем информацию о RAM (свободная и общая память)
+    ram_free=$(free | awk '/Mem:/ {printf "%.0f", $4/1024}')
+    ram_total=$(free | awk '/Mem:/ {printf "%.0f", $2/1024}')
+    
+    # Получаем информацию о диске (свободное и общее пространство)
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
+    disk_total=$(df -h / | awk 'NR==2 {print $2}')
+
     ext_ip=$(wget -qO- https://api.ipify.org)
+
     echo "📊 *Состояние системы:*
 
 📡 *Внешний IP*: $ext_ip
-🕒*$uptime_info*
-💽 *RAM*: ${ram_free}Kb
-📦 *Диск*: $disk_free
+💽 *RAM*: ${ram_free}Mb / ${ram_total}Mb
+📦 *Диск*: ${disk_free} / ${disk_total}
+🕒 *Uptime*: $uptime_info
 🔥 *CPU*: $cpu_load"
 }
 
