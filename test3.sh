@@ -1,11 +1,9 @@
 #!/bin/bash
 
-# Цвета
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Пути
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 WATCHDOG_SCRIPT="/root/frpc_watchdog.sh"
@@ -13,12 +11,6 @@ INFO_SCRIPT="/root/frpc_sysinfo.sh"
 CRON_FILE="/etc/crontabs/root"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-
-# Аргументы
-if [ "$1" == "--help" ]; then
-    echo "Использование: $0 [--DeviceName] [--DeviceNumber]"
-    exit 0
-fi
 
 DEVICE_NAME=""
 DEVICE_NUMBER=""
@@ -31,7 +23,6 @@ if [[ "$2" == --* ]]; then
     DEVICE_NUMBER="${2#--}"
 fi
 
-# Telegram уведомление
 send_telegram() {
     local text="$1"
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
@@ -40,7 +31,6 @@ send_telegram() {
         --data-urlencode "text=$text"
 }
 
-# Удаление
 remove_all() {
     echo -e "${RED}Удаление всех компонентов...${NC}"
     /etc/init.d/frpc stop 2>/dev/null
@@ -56,7 +46,6 @@ remove_all() {
     exit 0
 }
 
-# Меню
 if [ -z "$DEVICE_NAME" ] || [ -z "$DEVICE_NUMBER" ]; then
     echo -e "${GREEN}Выберите действие:${NC}
 1 — Установить frpc
@@ -68,37 +57,28 @@ if [ -z "$DEVICE_NAME" ] || [ -z "$DEVICE_NUMBER" ]; then
         echo -e "${RED}Неверный выбор. Завершение.${NC}"
         exit 1
     fi
+
+    # Запрос параметров только после выбора
+    read -p "Название устройства (например: Home): " DEVICE_NAME
+    read -p "Номер устройства (например: 21): " DEVICE_NUMBER
 fi
 
-# Установка curl и wget
 echo -e "${GREEN}Проверка curl и wget...${NC}"
 opkg update
 opkg install curl wget
 
-# Загрузка frpc
 echo -e "${GREEN}Подготовка каталога и загрузка frpc...${NC}"
 mkdir -p "$FRP_DIR"
 cd "$FRP_DIR" || exit
 rm -f frpc
 curl -L "https://github.com/middtho-dev/frp-router/raw/main/frpc" -o frpc
 chmod +x frpc
-echo -e "${GREEN}frpc скачан.${NC}"
 
-# Ввод параметров
-if [ -z "$DEVICE_NAME" ]; then
-    read -p "Название устройства (например: Home): " DEVICE_NAME
-fi
-if [ -z "$DEVICE_NUMBER" ]; then
-    read -p "Номер устройства (например: 21): " DEVICE_NUMBER
-fi
-
-# Прокси-порты
 luci_name="${DEVICE_NAME}_Luci"
 ssh_name="${DEVICE_NAME}_SSH"
 luci_port="80${DEVICE_NUMBER}"
 ssh_port="22${DEVICE_NUMBER}"
 
-# Настройка frpc.toml
 cat <<EOF > "$FRP_DIR/frpc.toml"
 serverAddr = "router.kv9.ru"
 serverPort = 7000
@@ -117,7 +97,6 @@ localPort = 22
 remotePort = $ssh_port
 EOF
 
-# Инициализация
 cat <<EOF > "$INIT_SCRIPT"
 #!/bin/sh /etc/rc.common
 
@@ -151,14 +130,11 @@ chmod +x "$INIT_SCRIPT"
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
-# Часовой пояс и имя хоста
 echo -e "${GREEN}Настройка имени и часового пояса...${NC}"
 uci set system.@system[0].hostname="$DEVICE_NAME"
 uci set system.@system[0].timezone='Europe/Moscow'
 uci commit system
-hostname "$DEVICE_NAME"
 
-# Watchdog
 cat <<'EOF' > "$WATCHDOG_SCRIPT"
 #!/bin/sh
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
@@ -207,7 +183,6 @@ EOF
 
 chmod +x "$WATCHDOG_SCRIPT"
 
-# Info
 cat <<'EOF' > "$INFO_SCRIPT"
 #!/bin/sh
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
@@ -242,13 +217,11 @@ EOF
 
 chmod +x "$INFO_SCRIPT"
 
-# Cron
 echo -e "${GREEN}Настройка cron...${NC}"
 ( crontab -l 2>/dev/null | grep -q "$WATCHDOG_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $WATCHDOG_SCRIPT" ) | crontab -
 ( crontab -l 2>/dev/null | grep -q "$INFO_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $INFO_SCRIPT" ) | crontab -
 /etc/init.d/cron restart
 
-# Завершение
 EXT_IP=$(wget -qO- https://api.ipify.org)
 MESSAGE="✅ FRPC установлен на *$DEVICE_NAME*
 
