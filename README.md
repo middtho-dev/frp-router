@@ -142,20 +142,3 @@ remotePort = 2221
 * основном скрипте
 * `frpc_util.sh`
 
----
-
-## Исходный код
-
-> [GitHub: middtho-dev/frp-router](https://github.com/middtho-dev/frp-router)
-
----
-
-## Лицензия
-
-MIT
-
----
-
-## Контакты
-
-Для вопросов и предложений: Telegram — [@middtho](https://t.me/middtho)
