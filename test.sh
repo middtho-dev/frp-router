@@ -14,6 +14,17 @@ CRON_FILE="/etc/crontabs/root"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
+# Аргументы
+AUTO_INSTALL=false
+DEVICE_NAME=""
+DEVICE_NUMBER=""
+
+if [[ "$1" == --* && "$2" == --* ]]; then
+    AUTO_INSTALL=true
+    DEVICE_NAME="${1#--}"
+    DEVICE_NUMBER="${2#--}"
+fi
+
 # Telegram уведомление
 send_telegram() {
     local text="$1"
@@ -26,7 +37,6 @@ send_telegram() {
 # Функция удаления
 remove_all() {
     echo -e "${RED}Удаление всех компонентов...${NC}"
-
     /etc/init.d/frpc stop 2>/dev/null
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
@@ -35,18 +45,21 @@ remove_all() {
     sed -i "\|$WATCHDOG_SCRIPT|d" "$CRON_FILE"
     sed -i "\|$INFO_SCRIPT|d" "$CRON_FILE"
     /etc/init.d/cron restart
-
     send_telegram "🗑️ FRPC и все скрипты удалены c *$HOSTNAME*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
 
 # Меню выбора
-echo -e "${GREEN}Выберите действие:${NC}
+if [ "$AUTO_INSTALL" = true ]; then
+    choice=1
+else
+    echo -e "${GREEN}Выберите действие:${NC}
 1 — Установить frpc
 2 — Удалить frpc и все скрипты"
+    read -p "Введите 1 или 2: " choice
+fi
 
-read -p "Введите 1 или 2: " choice
 if [ "$choice" = "2" ]; then
     remove_all
 elif [ "$choice" != "1" ]; then
@@ -63,7 +76,6 @@ opkg install curl wget
 echo -e "${GREEN}Подготовка каталога и загрузка frpc...${NC}"
 mkdir -p "$FRP_DIR"
 cd "$FRP_DIR" || exit
-
 [ -f "$FRP_DIR/frpc" ] && rm -f "$FRP_DIR/frpc"
 curl -L "https://github.com/middtho-dev/frp-router/raw/main/frpc" -o "frpc"
 chmod +x frpc
@@ -71,8 +83,13 @@ echo -e "${GREEN}frpc скачан.${NC}"
 
 # Получение параметров
 echo -e "${GREEN}Настройка frpc.toml...${NC}"
-read -p "Название устройства (например: Home): " device_name
-read -p "Номер устройства (например: 21): " device_number
+if [ "$AUTO_INSTALL" = false ]; then
+    read -p "Название устройства (например: Home): " device_name
+    read -p "Номер устройства (например: 21): " device_number
+else
+    device_name="$DEVICE_NAME"
+    device_number="$DEVICE_NUMBER"
+fi
 
 luci_name="${device_name}_Luci"
 ssh_name="${device_name}_SSH"
@@ -155,7 +172,6 @@ get_status() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
-    # Получаем трафик WAN-интерфейса
     IFACE="wan"
     LINE=$(ifconfig "$IFACE" 2>/dev/null | grep "RX bytes")
     RX=$(echo "$LINE" | sed -n 's/.*RX bytes:[0-9]\+ (\([^)]\+\)).*/\1/p')
@@ -170,7 +186,6 @@ echo "📊 *Состояние системы:*
 🔥 *CPU*: $cpu_load
 📥 *RX*: $RX
 📤 *TX*: $TX"
-"
 }
 
 if ! pgrep -f "$FRPC_BIN" > /dev/null; then
@@ -182,7 +197,7 @@ FRPC на *$HOSTNAME* не работает.
     sleep 5
     if pgrep -f "$FRPC_BIN" > /dev/null; then
         send_telegram "✅ FRPC на *$HOSTNAME* успешно перезапущен.
-    
+
 $(get_status)"
     else
         send_telegram "❌ Не удалось перезапустить FRPC на *$HOSTNAME*!"
@@ -214,7 +229,6 @@ get_info() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     ext_ip=$(wget -qO- https://api.ipify.org)
 
-    # Получаем трафик WAN-интерфейса
     IFACE="wan"
     LINE=$(ifconfig "$IFACE" 2>/dev/null | grep "RX bytes")
     RX=$(echo "$LINE" | sed -n 's/.*RX bytes:[0-9]\+ (\([^)]\+\)).*/\1/p')
@@ -238,16 +252,13 @@ chmod +x "$INFO_SCRIPT"
 
 # Cron
 echo -e "${GREEN}Настройка cron...${NC}"
-( crontab -l 2>/dev/null | grep -q "$WATCHDOG_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $WATCHDOG_SCRIPT" ) | crontab -
-( crontab -l 2>/dev/null | grep -q "$INFO_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $INFO_SCRIPT" ) | crontab -
+grep -q "$WATCHDOG_SCRIPT" "$CRON_FILE" 2>/dev/null || echo "*/1 * * * * $WATCHDOG_SCRIPT" >> "$CRON_FILE"
+grep -q "$INFO_SCRIPT" "$CRON_FILE" 2>/dev/null || echo "0 * * * * $INFO_SCRIPT" >> "$CRON_FILE"
 /etc/init.d/cron restart
 
 # Telegram сообщение об установке
 HOSTNAME=$(uname -n)
-UPTIME=$(uptime | cut -d',' -f1)
 EXT_IP=$(wget -qO- https://api.ipify.org)
-DISK=$(df -h / | awk 'NR==2 {print $4}')
-RAM=$(free -m | awk '/Mem:/ {print $4}')
 
 MESSAGE="✅ FRPC установлен на *$HOSTNAME*
 
@@ -256,5 +267,4 @@ MESSAGE="✅ FRPC установлен на *$HOSTNAME*
 📡 *Внешний IP*: $EXT_IP"
 
 send_telegram "$MESSAGE"
-
 echo -e "${GREEN}Установка завершена.${NC}"
