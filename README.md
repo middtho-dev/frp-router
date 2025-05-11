@@ -41,7 +41,7 @@
 ## Установка
 
 ```bash
-wget -O - sh <(wget -O - https://raw.githubusercontent.com/middtho-dev/frp-router/main/frpc-install.sh)
+sh <(wget -O - https://raw.githubusercontent.com/middtho-dev/frp-router/main/frpc-install.sh)
 ```
 
 Скрипт запросит:
