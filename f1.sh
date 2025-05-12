@@ -141,7 +141,9 @@ BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
 HOSTNAME=$(uname -n)
-PID_FILE="/tmp/authwatch.pid"
+
+AUTH_LOG_POS_FILE="/tmp/authwatch.pos"
+AUTH_LOG_FILE="/tmp/logread.tmp"
 
 send_telegram() {
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
@@ -170,39 +172,33 @@ get_status() {
 🔥 *CPU*: $cpu_load"
 }
 
-start_auth_logins_monitor() {
-    if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
-        echo "Auth логгер уже запущен, PID: $(cat $PID_FILE)"
-        return
+check_auth_logins_once() {
+    logread > "$AUTH_LOG_FILE"
+
+    if [ -f "$AUTH_LOG_POS_FILE" ]; then
+        last_line=$(cat "$AUTH_LOG_POS_FILE")
+    else
+        last_line=0
     fi
 
-    nohup sh -c '
-        logread -f | while read -r line; do
-            if echo "$line" | grep -q -iE "Accepted password for|dropbear.*Password auth succeeded"; then
-                user=$(echo "$line" | grep -oE "user \S+" | awk "{print \$2}")
-                ip=$(echo "$line" | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | awk "{print \$2}")
-                curl -s -X POST "https://api.telegram.org/bot'"$BOT_TOKEN"'/sendMessage" \
-                    -d chat_id="'"$CHAT_ID"'" \
-                    -d parse_mode=Markdown \
-                    --data-urlencode "text=✅ *SSH вход* на *'"$HOSTNAME"'* от \`$user\` с IP \`$ip\`"
-            elif echo "$line" | grep -qi "luci"; then
-                if echo "$line" | grep -qi "authentication failure"; then
-                    curl -s -X POST "https://api.telegram.org/bot'"$BOT_TOKEN"'/sendMessage" \
-                        -d chat_id="'"$CHAT_ID"'" \
-                        -d parse_mode=Markdown \
-                        --data-urlencode "text=❌ *Ошибка входа в LuCI* на *'"$HOSTNAME"'*:\n\`$line\`"
-                elif echo "$line" | grep -qi "Authenticated successfully"; then
-                    curl -s -X POST "https://api.telegram.org/bot'"$BOT_TOKEN"'/sendMessage" \
-                        -d chat_id="'"$CHAT_ID"'" \
-                        -d parse_mode=Markdown \
-                        --data-urlencode "text=✅ *Вход в LuCI* на *'"$HOSTNAME"'*:\n\`$line\`"
-                fi
-            fi
-        done
-    ' >/dev/null 2>&1 &
+    total_lines=$(wc -l < "$AUTH_LOG_FILE")
+    new_lines=$(tail -n +"$((last_line + 1))" "$AUTH_LOG_FILE")
 
-    echo $! > "$PID_FILE"
-    echo "Auth логгер запущен, PID: $(cat $PID_FILE)"
+    echo "$total_lines" > "$AUTH_LOG_POS_FILE"
+
+    echo "$new_lines" | while read -r line; do
+        if echo "$line" | grep -q -iE "Accepted password for|dropbear.*Password auth succeeded"; then
+            user=$(echo "$line" | grep -oE "user \S+" | awk '{print $2}')
+            ip=$(echo "$line" | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | awk '{print $2}')
+            send_telegram "✅ *SSH вход* на *$HOSTNAME* от \`$user\` с IP \`$ip\`"
+        elif echo "$line" | grep -qi "luci"; then
+            if echo "$line" | grep -qi "authentication failure"; then
+                send_telegram "❌ *Ошибка входа в LuCI* на *$HOSTNAME*:\n\`$line\`"
+            elif echo "$line" | grep -qi "Authenticated successfully"; then
+                send_telegram "✅ *Вход в LuCI* на *$HOSTNAME*:\n\`$line\`"
+            fi
+        fi
+    done
 }
 
 if [ "$1" = "check" ]; then
@@ -222,8 +218,7 @@ $(get_status)"
         fi
     fi
 
-    # Запуск логгера авторизаций
-    start_auth_logins_monitor
+    check_auth_logins_once
 
 elif [ "$1" = "info" ]; then
     send_telegram "$(get_status)"
