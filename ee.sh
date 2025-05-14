@@ -36,10 +36,8 @@ remove_all() {
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
     rm -rf "$FRP_DIR"
-    rm -f /usr/bin/ntp-retry.sh
     sed -i "\|$UTIL_SCRIPT check|d" "$CRON_FILE"
     sed -i "\|$UTIL_SCRIPT info|d" "$CRON_FILE"
-    sed -i "\|ntp-retry.sh|d" "$CRON_FILE"
     /etc/init.d/cron restart
     send_telegram "🗑️ FRPC и все скрипты удалены c *$(uname -n)*"
     echo -e "${GREEN}Удаление завершено.${NC}"
@@ -152,6 +150,8 @@ send_telegram() {
 
 get_status() {
     uptime_info=$(uptime | awk -F'up ' '{print $2}' | cut -d',' -f1)
+
+    # Получаем load average и количество ядер
     load=$(uptime | awk -F'load average: ' '{print $2}' | cut -d, -f1)
     cores=$(grep -c ^processor /proc/cpuinfo)
     if [ "$cores" -gt 0 ]; then
@@ -159,10 +159,15 @@ get_status() {
     else
         cpu_load="n/a"
     fi
+
+    # Получаем информацию о RAM (свободная и общая память)
     ram_free=$(free | awk '/Mem:/ {printf "%.0f", $4/1024}')
     ram_total=$(free | awk '/Mem:/ {printf "%.0f", $2/1024}')
+    
+    # Получаем информацию о диске (свободное и общее пространство)
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     disk_total=$(df -h / | awk 'NR==2 {print $2}')
+
     ext_ip=$(wget -qO- https://api.ipify.org)
 
     echo "📊 *Состояние системы:*
@@ -172,6 +177,20 @@ get_status() {
 📦 *Диск*: ${disk_free} / ${disk_total}
 🕒 *Uptime*: $uptime_info
 🔥 *CPU*: $cpu_load"
+}
+
+sync_time() {
+    sleep 10
+    while true; do
+        if timeout 10 wget -qO- time.cloudflare.com > /dev/null; then
+            ntpd -q -p pool.ntp.org
+            send_telegram "⏰ Время успешно синхронизировано на *$(uname -n)*"
+            break
+        else
+            send_telegram "⚠️ Не удалось синхронизировать время на *$(uname -n)*. Повтор через 10 секунд."
+            sleep 10
+        fi
+    done
 }
 
 if [ "$1" = "check" ]; then
@@ -190,49 +209,21 @@ $(get_status)"
             send_telegram "❌ Не удалось запустить FRPC на *$(uname -n)*!"
         fi
     fi
+    sync_time
 elif [ "$1" = "info" ]; then
     HOSTNAME=$(uname -n)
     send_telegram "📊 Состояние системы на *$HOSTNAME*
 
 $(get_status)"
 fi
+
 EOF
 
 chmod +x "$UTIL_SCRIPT"
 
-echo -e "${GREEN}Создание скрипта синхронизации времени...${NC}"
-
-cat <<EOF > /usr/bin/ntp-retry.sh
-#!/bin/sh
-
-BOT_TOKEN="$BOT_TOKEN"
-CHAT_ID="$CHAT_ID"
-
-send_telegram() {
-    curl -s -X POST "https://api.telegram.org/bot\$BOT_TOKEN/sendMessage" \\
-        -d chat_id="\$CHAT_ID" \\
-        -d parse_mode=Markdown \\
-        --data-urlencode "text=\$1"
-}
-
-while true; do
-    sleep 30
-    if ntpd -q -n >/dev/null 2>&1; then
-        TIME_NOW=\$(date '+%Y-%m-%d %H:%M:%S')
-        send_telegram "✅ Время синхронизировано на *\$(uname -n)*: \$TIME_NOW"
-        exit 0
-    else
-        send_telegram "❌ Не удалось синхронизировать время на *\$(uname -n)*. Повтор через 30 секунд..."
-    fi
-done
-EOF
-
-chmod +x /usr/bin/ntp-retry.sh
-
 echo -e "${GREEN}Настройка cron...${NC}"
 ( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT check" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $UTIL_SCRIPT check" ) | crontab -
 ( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT info" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $UTIL_SCRIPT info" ) | crontab -
-( crontab -l 2>/dev/null | grep -q "ntp-retry.sh" ) || ( crontab -l 2>/dev/null; echo "@reboot /usr/bin/ntp-retry.sh &" ) | crontab -
 /etc/init.d/cron restart
 
 EXT_IP=$(wget -qO- https://api.ipify.org)
