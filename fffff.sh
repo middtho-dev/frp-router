@@ -187,14 +187,14 @@ get_status() {
     frpc_status=$(check_frpc)
 
     echo "📊 *Система: $HOSTNAME*
-$frpc_status"
+$frpc_status
 а
 📡 IP: $ext_ip
 🕰️ Время: $current_time
 💽 RAM: ${ram_free}Mb / ${ram_total}Mb
 📦 Диск: ${disk_free} / ${disk_total}
 🕒 Аптайм: $uptime_info
-🔥 CPU: $cpu_load
+🔥 CPU: $cpu_load"
 }
 
 init_status_message() {
