@@ -7,7 +7,6 @@ NC='\033[0m'
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 UTIL_SCRIPT="$FRP_DIR/frpc_util.sh"
-CRON_FILE="/etc/crontabs/root"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
@@ -27,7 +26,7 @@ send_telegram() {
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$text"
+        --data-urlencode "text=$text" > /dev/null
 }
 
 remove_all() {
@@ -36,10 +35,8 @@ remove_all() {
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
     rm -rf "$FRP_DIR"
-    sed -i "\|$UTIL_SCRIPT check|d" "$CRON_FILE"
-    sed -i "\|$UTIL_SCRIPT info|d" "$CRON_FILE"
-    /etc/init.d/cron restart
-    send_telegram "🗑️ FRPC и все скрипты удалены c *$(uname -n)*"
+    sed -i "\|$UTIL_SCRIPT|d" /etc/rc.local 2>/dev/null
+    send_telegram "🗑️ FRPC и скрипты удалены с *$(uname -n)*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
@@ -139,13 +136,16 @@ cat <<'EOF' > "$UTIL_SCRIPT"
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-STATE_MSG_ID_FILE="/tmp/telegram_status_msg_id"
+MSG_ID_FILE="/root/.status_msg_id"
+HOSTNAME="$(uname -n)"
 
 send_telegram() {
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+    local text="$1"
+    local resp=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$1"
+        --data-urlencode "text=$text")
+    echo "$resp" | grep -o '"message_id":[0-9]*' | cut -d':' -f2
 }
 
 edit_telegram() {
@@ -155,11 +155,25 @@ edit_telegram() {
         -d chat_id="$CHAT_ID" \
         -d message_id="$msg_id" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$text"
+        --data-urlencode "text=$text" > /dev/null
+}
+
+check_frpc() {
+    if pidof frpc > /dev/null; then
+        echo "✅ FRPC работает"
+    else
+        /etc/init.d/frpc restart
+        sleep 5
+        if pidof frpc > /dev/null; then
+            echo "✅ FRPC перезапущен"
+        else
+            echo "❌ FRPC не запустился"
+        fi
+    fi
 }
 
 get_status() {
-    uptime_info=$(uptime | awk -F'up ' '{print $2}' | cut -d',' -f1)
+    uptime_info=$(uptime | awk -F'up ' '{print $2}' | cut -d',' -f1 | xargs)
     load=$(uptime | awk -F'load average: ' '{print $2}' | cut -d, -f1)
     cores=$(grep -c ^processor /proc/cpuinfo)
     cpu_load=$(awk -v l="$load" -v c="$cores" 'BEGIN { printf "%.0f%%", (l/c)*100 }')
@@ -168,50 +182,42 @@ get_status() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     disk_total=$(df -h / | awk 'NR==2 {print $2}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-    echo "📊 *Состояние системы:*
 
-📡 *Внешний IP*: $ext_ip
-💽 *RAM*: ${ram_free}Mb / ${ram_total}Mb
-📦 *Диск*: ${disk_free} / ${disk_total}
-🕒 *Uptime*: $uptime_info
-🔥 *CPU*: $cpu_load"
+    frpc_status=$(check_frpc)
+
+    echo "📊 *Система: $HOSTNAME*
+
+📡 IP: $ext_ip
+💽 RAM: ${ram_free}Mb / ${ram_total}Mb
+📦 Диск: ${disk_free} / ${disk_total}
+🕒 Аптайм: $uptime_info
+🔥 CPU: $cpu_load
+
+$frpc_status"
+}
+
+init_status_message() {
+    local msg_id=$(send_telegram "$(get_status)")
+    echo "$msg_id" > "$MSG_ID_FILE"
 }
 
 start_monitor() {
-    HOSTNAME=$(uname -n)
-    status="$(get_status)"
-    resp=$(send_telegram "📊 Состояние системы на *$HOSTNAME*
+    local msg_id=""
+    [ -f "$MSG_ID_FILE" ] && msg_id=$(cat "$MSG_ID_FILE")
 
-$status")
-    msg_id=$(echo "$resp" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
-    echo "$msg_id" > "$STATE_MSG_ID_FILE"
+    if [ -z "$msg_id" ]; then
+        init_status_message
+        msg_id=$(cat "$MSG_ID_FILE")
+    fi
 
     while true; do
+        edit_telegram "$msg_id" "$(get_status)"
         sleep $((RANDOM % 5 + 1))
-        status="$(get_status)"
-        edit_telegram "$msg_id" "📊 Состояние системы на *$HOSTNAME*
-
-$status"
     done
 }
 
-if [ "$1" = "check" ]; then
-    DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
-    if ! pidof frpc > /dev/null; then
-        send_telegram "⚠️ *$DATE_NOW*
-
-FRPC на *$(uname -n)* не работает. 
-Перезапуск..."
-        /etc/init.d/frpc restart
-        sleep 5
-        if pidof frpc > /dev/null; then
-            send_telegram "✅ *FRPC* на *$(uname -n)* успешно запущен.
-
-$(get_status)"
-        else
-            send_telegram "❌ Не удалось запустить FRPC на *$(uname -n)*!"
-        fi
-    fi
+if [ "$1" = "init" ]; then
+    init_status_message
 elif [ "$1" = "info" ]; then
     start_monitor &
 fi
@@ -219,17 +225,13 @@ EOF
 
 chmod +x "$UTIL_SCRIPT"
 
-echo -e "${GREEN}Настройка cron...${NC}"
-( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT check" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $UTIL_SCRIPT check" ) | crontab -
-$UTIL_SCRIPT info
-/etc/init.d/cron restart
+# Настраиваем автозапуск мониторинга в rc.local
+if ! grep -q "$UTIL_SCRIPT info" /etc/rc.local 2>/dev/null; then
+    sed -i "/^exit 0/i $UTIL_SCRIPT info &" /etc/rc.local 2>/dev/null || echo "$UTIL_SCRIPT info &" >> /etc/rc.local
+fi
 
-EXT_IP=$(wget -qO- https://api.ipify.org)
-MESSAGE="✅ FRPC установлен на *$DEVICE_NAME*
+# Стартовый статус и фоновый мониторинг
+"$UTIL_SCRIPT" init
+"$UTIL_SCRIPT" info &
 
-🔹 *Luci:* http://router.kv9.ru:$luci_port
-🔹 *SSH:* http://router.kv9.ru:$ssh_port
-📡 *Внешний IP*: $EXT_IP"
-
-send_telegram "$MESSAGE"
-echo -e "${GREEN}Установка завершена.${NC}"
+echo -e "${GREEN}Установка и настройка завершены.${NC}"
