@@ -144,7 +144,7 @@ EOF
 
 chmod +x "$TIME_SYNC_SCRIPT"
 
-# Утилита мониторинга и обновления Telegram-сообщения
+# Утилита мониторинга
 cat <<'EOF' > "$UTIL_SCRIPT"
 #!/bin/sh
 
@@ -169,6 +169,15 @@ send_or_edit_message() {
             --data-urlencode "text=$TEXT" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
         echo "$MSG_ID" > "$MSG_ID_FILE"
     fi
+}
+
+send_once() {
+    TEXT=$(cat)
+    MSG_ID=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d chat_id="$CHAT_ID" \
+        -d parse_mode=Markdown \
+        --data-urlencode "text=$TEXT" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
+    echo "$MSG_ID" > "$MSG_ID_FILE"
 }
 
 check_frpc() {
@@ -217,6 +226,16 @@ get_status() {
 $frpc_status"
 }
 
+if [ "$1" = "send_once" ]; then
+    send_once
+    exit 0
+fi
+
+if [ "$1" = "get_status" ]; then
+    get_status
+    exit 0
+fi
+
 if [ "$1" = "loop" ]; then
     sleep 10
     while true; do
@@ -241,6 +260,12 @@ INIT_MSG="✅ FRPC установлен на *$DEVICE_NAME*
 📡 *Внешний IP*: $EXT_IP"
 
 send_telegram "$INIT_MSG"
+
+# Первая отправка статуса и сохранение message_id
+echo -e "${GREEN}Отправка первого статус-сообщения...${NC}"
+get_status_cmd="$UTIL_SCRIPT get_status"
+send_msg_cmd="$UTIL_SCRIPT send_once"
+sh -c "$get_status_cmd | $send_msg_cmd"
 
 # Стартуем фоновый статус-луп сразу
 "$UTIL_SCRIPT" loop &
