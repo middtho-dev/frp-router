@@ -182,18 +182,19 @@ get_status() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     disk_total=$(df -h / | awk 'NR==2 {print $2}')
     ext_ip=$(wget -qO- https://api.ipify.org)
+    current_time=$(date '+%Y-%m-%d %H:%M:%S')
 
     frpc_status=$(check_frpc)
 
     echo "📊 *Система: $HOSTNAME*
-
+$frpc_status"
+а
 📡 IP: $ext_ip
+🕰️ Время: $current_time
 💽 RAM: ${ram_free}Mb / ${ram_total}Mb
 📦 Диск: ${disk_free} / ${disk_total}
 🕒 Аптайм: $uptime_info
 🔥 CPU: $cpu_load
-
-$frpc_status"
 }
 
 init_status_message() {
