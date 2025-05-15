@@ -139,33 +139,30 @@ cat <<'EOF' > "$UTIL_SCRIPT"
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-MSG_ID_FILE="/tmp/frpc_msg_id"
+STATE_MSG_ID_FILE="/tmp/telegram_status_msg_id"
 
-send_message() {
-    local msg="$1"
+send_telegram() {
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$msg"
+        --data-urlencode "text=$1"
 }
 
-edit_message() {
-    local msg="$1"
-    local msg_id
-    msg_id=$(cat "$MSG_ID_FILE" 2>/dev/null)
-    [ -z "$msg_id" ] && return
+edit_telegram() {
+    local msg_id="$1"
+    local text="$2"
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/editMessageText" \
         -d chat_id="$CHAT_ID" \
         -d message_id="$msg_id" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$msg"
+        --data-urlencode "text=$text"
 }
 
 get_status() {
     uptime_info=$(uptime | awk -F'up ' '{print $2}' | cut -d',' -f1)
     load=$(uptime | awk -F'load average: ' '{print $2}' | cut -d, -f1)
     cores=$(grep -c ^processor /proc/cpuinfo)
-    [ "$cores" -gt 0 ] && cpu_load=$(awk -v l="$load" -v c="$cores" 'BEGIN { printf "%.0f%%", (l/c)*100 }') || cpu_load="n/a"
+    cpu_load=$(awk -v l="$load" -v c="$cores" 'BEGIN { printf "%.0f%%", (l/c)*100 }')
     ram_free=$(free | awk '/Mem:/ {printf "%.0f", $4/1024}')
     ram_total=$(free | awk '/Mem:/ {printf "%.0f", $2/1024}')
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
@@ -180,44 +177,43 @@ get_status() {
 🔥 *CPU*: $cpu_load"
 }
 
-start_monitor_loop() {
-    ( 
-        while true; do
-            msg="$(get_status)"
-            edit_message "$msg"
-            sleep $(shuf -i 1-5 -n 1)
-        done 
-    ) &
+start_monitor() {
+    HOSTNAME=$(uname -n)
+    status="$(get_status)"
+    resp=$(send_telegram "📊 Состояние системы на *$HOSTNAME*
+
+$status")
+    msg_id=$(echo "$resp" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
+    echo "$msg_id" > "$STATE_MSG_ID_FILE"
+
+    while true; do
+        sleep $((RANDOM % 5 + 1))
+        status="$(get_status)"
+        edit_telegram "$msg_id" "📊 Состояние системы на *$HOSTNAME*
+
+$status"
+    done
 }
 
 if [ "$1" = "check" ]; then
     DATE_NOW=$(date '+%Y-%m-%d %H:%M:%S')
     if ! pidof frpc > /dev/null; then
-        send_message "⚠️ *$DATE_NOW*
+        send_telegram "⚠️ *$DATE_NOW*
 
-FRPC на *$(uname -n)* не работает.
+FRPC на *$(uname -n)* не работает. 
 Перезапуск..."
         /etc/init.d/frpc restart
         sleep 5
         if pidof frpc > /dev/null; then
-            send_message "✅ *FRPC* на *$(uname -n)* успешно запущен."
+            send_telegram "✅ *FRPC* на *$(uname -n)* успешно запущен.
+
+$(get_status)"
         else
-            send_message "❌ Не удалось запустить FRPC на *$(uname -n)*!"
+            send_telegram "❌ Не удалось запустить FRPC на *$(uname -n)*!"
         fi
     fi
-
 elif [ "$1" = "info" ]; then
-    HOSTNAME=$(uname -n)
-    STATUS="$(get_status)"
-    msg_id=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        -d chat_id="$CHAT_ID" \
-        -d parse_mode=Markdown \
-        --data-urlencode "text=📊 Состояние системы на *$HOSTNAME*:
-
-$STATUS" | grep -o '"message_id":[0-9]*' | cut -d: -f2)
-
-    echo "$msg_id" > "$MSG_ID_FILE"
-    start_monitor_loop
+    start_monitor &
 fi
 EOF
 
@@ -225,10 +221,8 @@ chmod +x "$UTIL_SCRIPT"
 
 echo -e "${GREEN}Настройка cron...${NC}"
 ( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT check" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $UTIL_SCRIPT check" ) | crontab -
+$UTIL_SCRIPT info
 /etc/init.d/cron restart
-
-# запуск цикла обновления
-"$UTIL_SCRIPT" info &
 
 EXT_IP=$(wget -qO- https://api.ipify.org)
 MESSAGE="✅ FRPC установлен на *$DEVICE_NAME*
