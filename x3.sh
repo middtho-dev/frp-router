@@ -7,6 +7,8 @@ NC='\033[0m'
 FRP_DIR="/root/frp"
 INIT_SCRIPT="/etc/init.d/frpc"
 UTIL_SCRIPT="$FRP_DIR/frpc_util.sh"
+TIME_SYNC_SCRIPT="$FRP_DIR/sync_time.sh"
+CRON_FILE="/etc/crontabs/root"
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
 
@@ -26,7 +28,7 @@ send_telegram() {
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d parse_mode=Markdown \
-        --data-urlencode "text=$text" > /dev/null
+        --data-urlencode "text=$text"
 }
 
 remove_all() {
@@ -35,8 +37,10 @@ remove_all() {
     /etc/init.d/frpc disable 2>/dev/null
     rm -f "$INIT_SCRIPT"
     rm -rf "$FRP_DIR"
-    sed -i "\|$UTIL_SCRIPT|d" /etc/rc.local 2>/dev/null
-    send_telegram "🗑️ FRPC и скрипты удалены с *$(uname -n)*"
+    sed -i "\|$UTIL_SCRIPT|d" "$CRON_FILE"
+    sed -i "\|$TIME_SYNC_SCRIPT|d" "$CRON_FILE"
+    /etc/init.d/cron restart
+    send_telegram "🗑️ FRPC и все скрипты удалены c *$(uname -n)*"
     echo -e "${GREEN}Удаление завершено.${NC}"
     exit 0
 }
@@ -57,9 +61,9 @@ if [ -z "$DEVICE_NAME" ] || [ -z "$DEVICE_NUMBER" ]; then
     read -p "Номер устройства (например: 21): " DEVICE_NUMBER
 fi
 
-echo -e "${GREEN}Проверка curl и wget...${NC}"
+echo -e "${GREEN}Установка пакетов...${NC}"
 opkg update
-opkg install curl wget
+opkg install curl wget ntpd
 
 echo -e "${GREEN}Подготовка каталога и загрузка frpc...${NC}"
 mkdir -p "$FRP_DIR"
@@ -124,50 +128,59 @@ chmod +x "$INIT_SCRIPT"
 /etc/init.d/frpc enable
 /etc/init.d/frpc start
 
-echo -e "${GREEN}Настройка имени и часового пояса...${NC}"
+echo -e "${GREEN}Настройка имени и зоны...${NC}"
 uci set system.@system[0].hostname="$DEVICE_NAME"
 uci set system.@system[0].timezone='MSK-3'
 uci set system.@system[0].zonename='Europe/Moscow'
 uci commit system
 /etc/init.d/system reload
 
+# Скрипт синхронизации времени через 20 сек после загрузки
+cat <<'EOF' > "$TIME_SYNC_SCRIPT"
+#!/bin/sh
+sleep 20
+ntpd -q -p pool.ntp.org && echo "1" > /tmp/time_synced.flag || echo "0" > /tmp/time_synced.flag
+EOF
+
+chmod +x "$TIME_SYNC_SCRIPT"
+
+# Утилита мониторинга и обновления Telegram-сообщения
 cat <<'EOF' > "$UTIL_SCRIPT"
 #!/bin/sh
 
 BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
 CHAT_ID="382094545"
-MSG_ID_FILE="/root/.status_msg_id"
-HOSTNAME="$(uname -n)"
+MSG_ID_FILE="/tmp/frpc_status_msg_id"
+HOSTNAME=$(uname -n)
 
-send_telegram() {
-    local text="$1"
-    local resp=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        -d chat_id="$CHAT_ID" \
-        -d parse_mode=Markdown \
-        --data-urlencode "text=$text")
-    echo "$resp" | grep -o '"message_id":[0-9]*' | cut -d':' -f2
-}
-
-edit_telegram() {
-    local msg_id="$1"
-    local text="$2"
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/editMessageText" \
-        -d chat_id="$CHAT_ID" \
-        -d message_id="$msg_id" \
-        -d parse_mode=Markdown \
-        --data-urlencode "text=$text" > /dev/null
+send_or_edit_message() {
+    TEXT="$1"
+    if [ -f "$MSG_ID_FILE" ]; then
+        MSG_ID=$(cat "$MSG_ID_FILE")
+        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/editMessageText" \
+            -d chat_id="$CHAT_ID" \
+            -d message_id="$MSG_ID" \
+            -d parse_mode=Markdown \
+            --data-urlencode "text=$TEXT"
+    else
+        MSG_ID=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d parse_mode=Markdown \
+            --data-urlencode "text=$TEXT" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
+        echo "$MSG_ID" > "$MSG_ID_FILE"
+    fi
 }
 
 check_frpc() {
     if pidof frpc > /dev/null; then
-        echo "✅ FRPC работает"
+        echo "✅ *FRPC работает*"
     else
         /etc/init.d/frpc restart
-        sleep 5
+        sleep 2
         if pidof frpc > /dev/null; then
-            echo "✅ FRPC перезапущен"
+            echo "♻️ *FRPC перезапущен*"
         else
-            echo "❌ FRPC не запустился"
+            echo "❌ *FRPC не запущен*"
         fi
     fi
 }
@@ -182,8 +195,14 @@ get_status() {
     disk_free=$(df -h / | awk 'NR==2 {print $4}')
     disk_total=$(df -h / | awk 'NR==2 {print $2}')
     ext_ip=$(wget -qO- https://api.ipify.org)
-
+    local_time=$(date '+%Y-%m-%d %H:%M:%S')
     frpc_status=$(check_frpc)
+
+    if [ -f /tmp/time_synced.flag ] && [ "$(cat /tmp/time_synced.flag)" = "1" ]; then
+        time_synced="Да"
+    else
+        time_synced="Нет"
+    fi
 
     echo "📊 *Система: $HOSTNAME*
 
@@ -192,46 +211,38 @@ get_status() {
 📦 Диск: ${disk_free} / ${disk_total}
 🕒 Аптайм: $uptime_info
 🔥 CPU: $cpu_load
+🕰 Время: $local_time
+🔄 Синхронизация времени: *$time_synced*
 
 $frpc_status"
 }
 
-init_status_message() {
-    local msg_id=$(send_telegram "$(get_status)")
-    echo "$msg_id" > "$MSG_ID_FILE"
-}
-
-start_monitor() {
-    local msg_id=""
-    [ -f "$MSG_ID_FILE" ] && msg_id=$(cat "$MSG_ID_FILE")
-
-    if [ -z "$msg_id" ]; then
-        init_status_message
-        msg_id=$(cat "$MSG_ID_FILE")
-    fi
-
+if [ "$1" = "loop" ]; then
+    sleep 10
     while true; do
-        edit_telegram "$msg_id" "$(get_status)"
+        get_status | send_or_edit_message
         sleep $((RANDOM % 5 + 1))
     done
-}
-
-if [ "$1" = "init" ]; then
-    init_status_message
-elif [ "$1" = "info" ]; then
-    start_monitor &
 fi
 EOF
 
 chmod +x "$UTIL_SCRIPT"
 
-# Настраиваем автозапуск мониторинга в rc.local
-if ! grep -q "$UTIL_SCRIPT info" /etc/rc.local 2>/dev/null; then
-    sed -i "/^exit 0/i $UTIL_SCRIPT info &" /etc/rc.local 2>/dev/null || echo "$UTIL_SCRIPT info &" >> /etc/rc.local
-fi
+echo -e "${GREEN}Настройка автозапуска...${NC}"
+( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT loop" ) || ( crontab -l 2>/dev/null; echo "@reboot $UTIL_SCRIPT loop" ) | crontab -
+( crontab -l 2>/dev/null | grep -q "$TIME_SYNC_SCRIPT" ) || ( crontab -l 2>/dev/null; echo "@reboot $TIME_SYNC_SCRIPT" ) | crontab -
+/etc/init.d/cron restart
 
-# Стартовый статус и фоновый мониторинг
-"$UTIL_SCRIPT" init
-"$UTIL_SCRIPT" info &
+EXT_IP=$(wget -qO- https://api.ipify.org)
+INIT_MSG="✅ FRPC установлен на *$DEVICE_NAME*
 
-echo -e "${GREEN}Установка и настройка завершены.${NC}"
+🔹 *Luci:* http://router.kv9.ru:$luci_port
+🔹 *SSH:* http://router.kv9.ru:$ssh_port
+📡 *Внешний IP*: $EXT_IP"
+
+send_telegram "$INIT_MSG"
+
+# Стартуем фоновый статус-луп сразу
+"$UTIL_SCRIPT" loop &
+
+echo -e "${GREEN}Установка завершена.${NC}"
