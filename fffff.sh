@@ -188,7 +188,7 @@ get_status() {
 
     echo "📊 *Система: $HOSTNAME*
 $frpc_status
-а
+
 📡 IP: $ext_ip
 🕰️ Время: $current_time
 💽 RAM: ${ram_free}Mb / ${ram_total}Mb
