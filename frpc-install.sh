@@ -207,7 +207,6 @@ chmod +x "$UTIL_SCRIPT"
 
 echo -e "${GREEN}Настройка cron...${NC}"
 ( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT check" ) || ( crontab -l 2>/dev/null; echo "*/1 * * * * $UTIL_SCRIPT check" ) | crontab -
-( crontab -l 2>/dev/null | grep -q "$UTIL_SCRIPT info" ) || ( crontab -l 2>/dev/null; echo "0 * * * * $UTIL_SCRIPT info" ) | crontab -
 /etc/init.d/cron restart
 
 EXT_IP=$(wget -qO- https://api.ipify.org)
