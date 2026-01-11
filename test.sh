@@ -9,7 +9,7 @@ INIT_SCRIPT="/etc/init.d/frpc"
 UTIL_SCRIPT="$FRP_DIR/frpc_util.sh"
 CRON_FILE="/etc/crontabs/root"
 
-BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+BOT_TOKEN="7786126155:AAHgOtBGZ-kuObcBm3VhYM_bfyExCZlDauo"
 CHAT_ID="382094545"
 
 DEVICE_NAME=""
@@ -175,7 +175,7 @@ uci commit system
 cat <<'EOF' > "$UTIL_SCRIPT"
 #!/bin/sh
 
-BOT_TOKEN="6602514727:AAF7d2iEQmH5YbynKSZH-lPA9-BDUNmjphY"
+BOT_TOKEN="7786126155:AAHgOtBGZ-kuObcBm3VhYM_bfyExCZlDauo"
 CHAT_ID="382094545"
 
 send() {
